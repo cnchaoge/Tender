@@ -19,7 +19,7 @@ datas += collect_data_files('onnxruntime')
 datas += collect_data_files('tokenizers')
 
 # hidden imports
-hiddenimports = [
+_base_hiddenimports = [
     # FastAPI & uvicorn
     'uvicorn', 'uvicorn.loop', 'uvicorn.loops.auto', 'uvicorn.loops.uvloop',
     'uvicorn.protocols', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto',
@@ -63,8 +63,11 @@ hiddenimports = [
     'server.core.parser.document',
 ]
 
-# 合并 chromadb 所有子模块
-hiddenimports += chromadb_submodules
+# 合并 chromadb 所有子模块（去重）
+hiddenimports = _base_hiddenimports.copy()
+for m in chromadb_submodules:
+    if m not in hiddenimports:
+        hiddenimports.append(m)
 
 a = Analysis(
     ['server/main.py'],
