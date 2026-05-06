@@ -33,13 +33,15 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
 
     # AI Model
-    LLM_PROVIDER: str = "dashscope"  # dashscope | openai | minimax
+    LLM_PROVIDER: str = "dashscope"  # dashscope | openai | minimax | deepseek
     DASHSCOPE_API_KEY: str = ""
     DASHSCOPE_MODEL: str = "qwen-turbo"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     MINIMAX_API_KEY: str = ""
     MINIMAX_MODEL: str = "MiniMax-Text-01"
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_MODEL: str = "deepseek-chat"
 
     # Embedding
     EMBED_PROVIDER: str = "dashscope"  # dashscope | bge
