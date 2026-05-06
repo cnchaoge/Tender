@@ -67,3 +67,26 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def update_env(key: str, value: str):
+    """更新 .env 文件中的配置项"""
+    env_path = BASE_DIR / ".env"
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+    
+    found = False
+    new_lines = []
+    for line in lines:
+        if line.startswith(f"{key}="):
+            new_lines.append(f"{key}={value}")
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        new_lines.append(f"{key}={value}")
+    
+    env_path.write_text("\n".join(new_lines) + "\n")
+    # 清除缓存，下次 get_settings() 会重新读取
+    get_settings.cache_clear()
