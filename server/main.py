@@ -1,7 +1,7 @@
 """
 ClawOS X - FastAPI 入口
 """
-import os
+import sys, os
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +17,15 @@ from server.api import auth, kb, rag, bid, feishu, admin, relay
 async def lifespan(app: FastAPI):
     init_db()
     yield
+
+
+# PyInstaller 打包后的资源路径
+def _get_resource_path(relative_path: str) -> Path:
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # onefile 模式：从 sys._MEIPASS 解压目录读取
+        return Path(sys._MEIPASS) / relative_path
+    # 开发模式：从项目根目录读取
+    return Path(__file__).resolve().parent.parent / relative_path
 
 
 app = FastAPI(title="ClawOS X", version="1.0.0", lifespan=lifespan)
@@ -40,15 +49,16 @@ app.include_router(admin.router)
 app.include_router(relay.router)
 
 # 静态文件（前端dist）
-BASE_DIR = Path(__file__).resolve().parent.parent
-WEB_DIST = BASE_DIR / "web" / "dist"
+WEB_DIST = _get_resource_path("web/dist")
 if WEB_DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="assets")
 
 
 @app.get("/")
 async def root():
-    return FileResponse(str(WEB_DIST / "index.html"))
+    if WEB_DIST.exists():
+        return FileResponse(str(WEB_DIST / "index.html"))
+    return {"message": "ClawOS X API", "version": "1.0.0", "error": "web dist not found"}
 
 
 @app.get("/health")
