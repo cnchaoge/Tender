@@ -18,8 +18,9 @@ settings = get_settings()
 # ============ 请求/响应模型 ============
 
 class ModelConfigReq(BaseModel):
+    provider: str = "dashscope"  # dashscope | deepseek
     api_key: str
-    model: str = "qwen-turbo"
+    model: str = ""
 
 
 class ModelConfigResp(BaseModel):
@@ -41,6 +42,7 @@ class SystemConfig(BaseModel):
     """系统配置（不含敏感信息）"""
     llm_provider: str
     dashscope_model: str
+    deepseek_model: str
     dashscope_api_key_set: bool  # 是否已配置（不返回实际 key）
     feishu_app_id: str
     feishu_app_secret_set: bool  # 是否已配置
@@ -151,6 +153,7 @@ def get_config():
     return SystemConfig(
         llm_provider=s.LLM_PROVIDER,
         dashscope_model=s.DASHSCOPE_MODEL,
+        deepseek_model=s.DEEPSEEK_MODEL,
         dashscope_api_key_set=bool(s.DASHSCOPE_API_KEY),
         feishu_app_id=s.FEISHU_APP_ID,
         feishu_app_secret_set=bool(s.FEISHU_APP_SECRET),
@@ -162,30 +165,53 @@ def get_config():
 
 @router.post("/model/verify", response_model=ModelConfigResp)
 def verify_model_config(body: ModelConfigReq):
-    """验证通义千问 API Key 是否有效"""
-    import dashscope
-    dashscope.api_key = body.api_key
-    from dashscope import Generation
-    try:
-        resp = Generation.call(
-            model=body.model or "qwen-turbo",
-            messages=[{"role": "user", "content": "Hi"}],
-            max_tokens=5
-        )
-        if resp["status_code"] == 200:
+    """验证 AI 模型 API Key 是否有效"""
+    if not body.api_key:
+        return ModelConfigResp(valid=False, message="API Key 不能为空")
+
+    if body.provider == "deepseek":
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=body.api_key, base_url="https://api.deepseek.com")
+            model = body.model or "deepseek-chat"
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=5
+            )
             return ModelConfigResp(valid=True, message="API Key 有效")
-        else:
-            return ModelConfigResp(valid=False, message=f"验证失败: {resp.get('message', resp)}")
-    except Exception as e:
-        return ModelConfigResp(valid=False, message=f"验证异常: {str(e)}")
+        except Exception as e:
+            return ModelConfigResp(valid=False, message=f"验证异常: {str(e)}")
+
+    else:  # dashscope
+        import dashscope
+        dashscope.api_key = body.api_key
+        from dashscope import Generation
+        try:
+            resp = Generation.call(
+                model=body.model or "qwen-turbo",
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=5
+            )
+            if resp["status_code"] == 200:
+                return ModelConfigResp(valid=True, message="API Key 有效")
+            else:
+                return ModelConfigResp(valid=False, message=f"验证失败: {resp.get('message', resp)}")
+        except Exception as e:
+            return ModelConfigResp(valid=False, message=f"验证异常: {str(e)}")
 
 
 @router.post("/model/config", response_model=Resp)
 def save_model_config(body: ModelConfigReq):
-    """保存通义千问配置到 .env"""
-    update_env("DASHSCOPE_API_KEY", body.api_key)
-    update_env("DASHSCOPE_MODEL", body.model or "qwen-turbo")
-    update_env("LLM_PROVIDER", "dashscope")
+    """保存 AI 模型配置到 .env"""
+    if body.provider == "deepseek":
+        update_env("LLM_PROVIDER", "deepseek")
+        update_env("DEEPSEEK_API_KEY", body.api_key)
+        update_env("DEEPSEEK_MODEL", body.model or "deepseek-chat")
+    else:
+        update_env("LLM_PROVIDER", "dashscope")
+        update_env("DASHSCOPE_API_KEY", body.api_key)
+        update_env("DASHSCOPE_MODEL", body.model or "qwen-turbo")
     return Resp(message="配置已保存，需重启服务生效")
 
 

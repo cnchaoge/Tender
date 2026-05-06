@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "VITE_API_URL=http://localhost:18000 vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -4,13 +4,23 @@
       <!-- AI 模型配置 -->
       <el-col :span="12">
         <el-card>
-          <template #header>AI 模型配置（通义千问）</template>
+          <template #header>AI 模型配置</template>
           <el-form label-width="100px">
+            <el-form-item label="提供商">
+              <el-select v-model="cfg.provider" style="width: 100%">
+                <el-option label="通义千问" value="dashscope" />
+                <el-option label="DeepSeek" value="deepseek" />
+              </el-select>
+            </el-form-item>
             <el-form-item label="模型">
-              <el-select v-model="cfg.model" style="width: 100%">
+              <el-select v-if="cfg.provider === 'dashscope'" v-model="cfg.model" style="width: 100%">
                 <el-option label="qwen-turbo（快速）" value="qwen-turbo" />
                 <el-option label="qwen-plus（增强）" value="qwen-plus" />
                 <el-option label="qwen-max（最强）" value="qwen-max" />
+              </el-select>
+              <el-select v-else v-model="cfg.model" style="width: 100%">
+                <el-option label="deepseek-chat" value="deepseek-chat" />
+                <el-option label="deepseek-coder" value="deepseek-coder" />
               </el-select>
             </el-form-item>
             <el-form-item label="API Key">
@@ -114,6 +124,7 @@ const saving = ref(false)
 const restarting = ref(false)
 
 const cfg = ref({
+  provider: "dashscope",
   model: "qwen-turbo",
   api_key: "",
   feishu_app_id: "",
@@ -140,7 +151,10 @@ onMounted(async () => {
 async function loadConfig() {
   try {
     const resp = await api.get("/api/admin/config")
-    cfg.value.model = resp.data.dashscope_model || "qwen-turbo"
+    cfg.value.provider = resp.data.llm_provider || "dashscope"
+    cfg.value.model = resp.data.llm_provider === "deepseek"
+      ? (resp.data.deepseek_model || "deepseek-chat")
+      : (resp.data.dashscope_model || "qwen-turbo")
     cfg.value.feishu_app_id = resp.data.feishu_app_id || ""
   } catch (e) {
     // ignore
@@ -156,6 +170,7 @@ async function verifyModel() {
   v.value.model_msg = ""
   try {
     const resp = await api.post("/api/admin/model/verify", {
+      provider: cfg.value.provider,
       api_key: cfg.value.api_key,
       model: cfg.value.model
     })
@@ -175,6 +190,7 @@ async function saveModel() {
   saving.value = true
   try {
     await api.post("/api/admin/model/config", {
+      provider: cfg.value.provider,
       api_key: cfg.value.api_key,
       model: cfg.value.model
     })
