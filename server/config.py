@@ -33,16 +33,19 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
 
     # AI Model（默认 DeepSeek）
-    LLM_PROVIDER: str = "deepseek"  # deepseek | dashscope | openai
+    LLM_PROVIDER: str = "deepseek"  # deepseek | dashscope | openai | minimax
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_MODEL: str = "deepseek-chat"
     DASHSCOPE_API_KEY: str = ""
     DASHSCOPE_MODEL: str = "qwen-turbo"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
+    MINIMAX_API_KEY: str = ""
+    MINIMAX_MODEL: str = "MiniMax-M2.7"
+    MINIMAX_EMBED_MODEL: str = "embo-01"
 
     # Embedding
-    EMBED_PROVIDER: str = "deepseek"  # deepseek | dashscope | bge
+    EMBED_PROVIDER: str = "deepseek"  # deepseek | dashscope | bge | minimax
     DEEPSEEK_EMBED_MODEL: str = "deepseek-embed"
     DASHSCOPE_EMBED_MODEL: str = "text-embedding-v3"
     BGE_MODEL_PATH: str = ""

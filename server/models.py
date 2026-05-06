@@ -2,7 +2,7 @@
 ClawOS X - 数据模型
 """
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Union, Dict, Any
 from datetime import datetime
 
 
@@ -10,7 +10,7 @@ from datetime import datetime
 class Resp(BaseModel):
     code: int = 0
     message: str = "ok"
-    data: Optional[dict | list | str] = None
+    data: Optional[Union[dict, list, str]] = None
 
 
 # ============ 认证 ============
