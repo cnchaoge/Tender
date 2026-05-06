@@ -1,8 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys, os
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 block_cipher = None
+
+# ChromaDB 所有子模块（含 _generated, embedding_functions 等）
+chromadb_submodules = collect_submodules('chromadb')
 
 # 收集所有数据文件
 datas = [
@@ -10,7 +13,11 @@ datas = [
     ('web/dist/assets', 'web/dist/assets'),
 ]
 
-# 收集所有 hidden imports
+# sentence-transformers 模型文件
+datas += collect_data_files('sentence_transformers')
+datas += collect_data_files('onnxruntime')
+
+# hidden imports
 hiddenimports = [
     # FastAPI & uvicorn
     'uvicorn', 'uvicorn.loop', 'uvicorn.loops.auto', 'uvicorn.loops.uvloop',
@@ -20,17 +27,6 @@ hiddenimports = [
     'fastapi', 'starlette',
     # DB
     'aiosqlite', 'sqlite3',
-    # ChromaDB
-    'chromadb', 'chromadb.config', 'chromadb.api', 'chromadb.client',
-    'chromadb.db', 'chromadb.db.duckdb', 'chromadb.segment',
-    'chromadb.segment.impl.vector', 'chromadb.segment.impl.metadata',
-    'chromadb.utils.embedding_functions', 'chromadb.utils.embedding_functions._generated',
-    'chromadb.api.types', 'chromadb.api.fastapi',
-    'hnswlib',
-    # ONNX / sentence-transformers (chromadb default embedding)
-    'onnxruntime', 'onnxruntime.capi.onnxruntime_inference_collection',
-    'sentence_transformers', 'sentence_transformers.models',
-    'numpy', 'numpy.core', 'numpy.random',
     # Parsers
     'pdfplumber', 'pdfminer', 'pdfminer.high_level', 'pdfminer.pdfparser',
     'pdfminer.pdfpage', 'pdfminer.pdfdocument', 'pdfminer.pdfinterp',
@@ -60,11 +56,8 @@ hiddenimports = [
     'server.core.parser.document',
 ]
 
-# 收集 ONNX 模型文件（sentence-transformers / chromadb default embedding）
-from PyInstaller.utils.hooks import collect_data_files
-datas += collect_data_files('sentence_transformers')
-datas += collect_data_files('onnxruntime')
-
+# 合并 chromadb 所有子模块
+hiddenimports += chromadb_submodules
 
 a = Analysis(
     ['server/main.py'],
@@ -73,7 +66,6 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     win_no_prefer_redirects=False,
