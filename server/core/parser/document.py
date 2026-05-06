@@ -1,6 +1,6 @@
 """
 ClawOS X - 文档解析器
-支持 PDF, Word, Markdown, TXT
+支持 PDF, Word, Excel, Markdown, TXT
 """
 import os
 from pathlib import Path
@@ -11,6 +11,12 @@ import pdfplumber
 
 # Word
 from docx import Document as DocxDocument
+
+# Excel
+import openpyxl
+
+# PowerPoint
+from pptx import Presentation
 
 
 def parse_pdf(file_path: str) -> tuple[str, list[dict]]:
@@ -44,6 +50,44 @@ def parse_docx(file_path: str) -> tuple[str, list[dict]]:
     return "\n".join(full_text), paragraphs
 
 
+def parse_xlsx(file_path: str) -> tuple[str, list[dict]]:
+    """解析 Excel，返回 (纯文本, [Sheet/行信息列表])"""
+    wb = openpyxl.load_workbook(file_path, data_only=True)
+    full_text = []
+    sheet_info = []
+
+    for sheet_idx, sheet_name in enumerate(wb.sheetnames):
+        ws = wb[sheet_name]
+        sheet_lines = []
+        for row_idx, row in enumerate(ws.iter_rows(values_only=True), 1):
+            # 跳过空行
+            cells = [str(c).strip() if c is not None else "" for c in row]
+            line_text = " | ".join(cells)
+            if any(cells):
+                full_text.append(f"[Sheet:{sheet_name} 行{row_idx}] {line_text}")
+                sheet_lines.append({"sheet": sheet_name, "row": row_idx, "text": line_text})
+        sheet_info.extend(sheet_lines)
+
+    return "\n".join(full_text), sheet_info
+
+
+def parse_pptx(file_path: str) -> tuple[str, list[dict]]:
+    """解析 PowerPoint，返回 (纯文本, [幻灯片/形状信息列表])"""
+    prs = Presentation(file_path)
+    full_text = []
+    slide_info = []
+
+    for slide_idx, slide in enumerate(prs.slides, 1):
+        slide_lines = []
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text.strip():
+                full_text.append(f"[幻灯片{slide_idx}] {shape.text.strip()}")
+                slide_lines.append({"slide": slide_idx, "text": shape.text.strip()})
+        slide_info.extend(slide_lines)
+
+    return "\n".join(full_text), slide_info
+
+
 def parse_markdown(file_path: str) -> tuple[str, list[dict]]:
     """解析 Markdown"""
     with open(file_path, "r", encoding="utf-8") as f:
@@ -69,6 +113,9 @@ def parse_file(file_path: str) -> tuple[str, list[dict]]:
     parsers = {
         ".pdf": parse_pdf,
         ".docx": parse_docx,
+        ".xlsx": parse_xlsx,
+        ".xls": parse_xlsx,
+        ".pptx": parse_pptx,
         ".md": parse_markdown,
         ".txt": parse_txt,
     }
@@ -86,6 +133,9 @@ def get_file_type(filename: str) -> str:
     return {
         ".pdf": "pdf",
         ".docx": "docx",
+        ".xlsx": "xlsx",
+        ".xls": "xlsx",
+        ".pptx": "pptx",
         ".md": "md",
         ".txt": "txt",
     }.get(ext, "unknown")

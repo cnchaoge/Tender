@@ -34,22 +34,37 @@ def list_documents():
 @router.post("/folder", response_model=list[Document])
 async def add_folder(folder_path: str):
     """扫描指定文件夹，将所有支持的文件加入知识库"""
-    import glob
-
     folder = Path(folder_path)
     if not folder.is_dir():
         raise HTTPException(status_code=400, detail="文件夹不存在")
 
-    supported = [".pdf", ".docx", ".md", ".txt"]
+    supported = [".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt"]
     files = []
     for ext in supported:
-        files.extend(folder.rglob(f"*{ext}"))
+        # 排除 node_modules 和 __pycache__
+        for f in folder.rglob(f"*{ext}"):
+            if "node_modules" in f.parts or "__pycache__" in f.parts:
+                continue
+            files.append(f)
 
     if not files:
-        raise HTTPException(status_code=400, detail="文件夹中没有找到支持的文档（.pdf/.docx/.md/.txt）")
+        raise HTTPException(status_code=400, detail="文件夹中没有找到支持的文档（.pdf/.docx/.xlsx/.md/.txt）")
+
+    # 查询已有文件（去重：同名 + 同大小 = 同一文件）
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT file_path, file_size FROM documents")
+    existing = {(row["file_path"], row["file_size"]) for row in cur.fetchall()}
+    conn.close()
 
     results = []
+    skipped = 0
     for file_path in files:
+        key = (str(file_path), file_path.stat().st_size)
+        if key in existing:
+            skipped += 1
+            continue
+
         try:
             text, page_info = parse_file(str(file_path))
             chunks = chunk_text(text)
@@ -89,11 +104,10 @@ async def add_folder(folder_path: str):
             results.append(doc)
             conn.close()
         except Exception as e:
-            # 单个文件失败不影响其他文件
             print(f"解析失败 {file_path}: {e}")
             continue
 
-    if not results:
+    if not results and not skipped:
         raise HTTPException(status_code=500, detail="所有文件解析均失败")
     return results
 

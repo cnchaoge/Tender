@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from server.db.sqlite import init_db
-from server.api import auth, kb, rag, bid, feishu, admin
+from server.api import auth, kb, rag, bid, feishu, admin, relay
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ app.include_router(rag.router)
 app.include_router(bid.router)
 app.include_router(feishu.router)
 app.include_router(admin.router)
+app.include_router(relay.router)
 
 
 @app.get("/")
