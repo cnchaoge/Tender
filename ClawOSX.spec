@@ -69,6 +69,13 @@ for m in chromadb_submodules:
     if m not in hiddenimports:
         hiddenimports.append(m)
 
+# 强制收集 parser 包（PyInstaller 可能漏掉）
+for _pkg in ['pdfplumber', 'openpyxl', 'docx', 'pptx', 'markdown_it', 'markdown_it.main']:
+    try:
+        datas += collect_data_files(_pkg)
+    except Exception:
+        pass
+
 a = Analysis(
     ['server/main.py'],
     pathex=[],
