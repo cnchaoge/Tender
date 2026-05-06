@@ -79,7 +79,7 @@ def generate_bid(req: BidGenerateReq):
             if row:
                 chunks = retrieve(f"招标文件：{req.parse_result}", top_k=3, doc_ids=[doc_id])
                 for chunk in chunks:
-                    materials_text += f"[{row["filename"]}]\n{chunk["text"]}\n\n"
+                    materials_text += f"[{row['filename']}]\n{chunk['text']}\n\n"
         conn.close()
     
     prompt = f"""根据以下招标文件要求和素材，生成一份投标标书。

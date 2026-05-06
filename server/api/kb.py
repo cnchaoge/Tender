@@ -4,6 +4,7 @@ ClawOS X - 知识库管理 API
 import os
 import shutil
 import uuid
+from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 
@@ -12,6 +13,7 @@ from server.db.sqlite import get_db
 from server.db.chromadb import add_chunks, delete_doc_chunks
 from server.core.parser.document import parse_file, get_file_type
 from server.core.chunker.chunker import chunk_text
+from server.core.embedder.embedder import get_embedder
 from server.models import Document, Chunk, Resp
 
 router = APIRouter(prefix="/api/kb", tags=["知识库"])
@@ -29,71 +31,71 @@ def list_documents():
     return [Document(**dict(r)) for r in rows]
 
 
-@router.post("/documents", response_model=Document)
-async def upload_document(file: UploadFile = File(...)):
-    # 保存文件
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in [".pdf", ".docx", ".md", ".txt"]:
-        raise HTTPException(status_code=400, detail="不支持的文件类型")
-    
-    unique_name = f"{uuid.uuid4().hex}{ext}"
-    file_path = UPLOADS_DIR / unique_name
-    
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    
-    file_size = os.path.getsize(file_path)
-    file_type = get_file_type(file.filename)
-    
-    # 入库
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO documents (filename, file_type, file_path, file_size, status) VALUES (?, ?, ?, ?, ?)",
-        (file.filename, file_type, str(file_path), file_size, "processing")
-    )
-    doc_id = cur.lastrowid
-    conn.commit()
-    
-    # 解析
-    try:
-        text, page_info = parse_file(str(file_path))
-        chunks = chunk_text(text)
-        
-        # 存入 SQLite
-        chunk_records = []
-        for i, chunk_text_content in enumerate(chunks):
+@router.post("/folder", response_model=list[Document])
+async def add_folder(folder_path: str):
+    """扫描指定文件夹，将所有支持的文件加入知识库"""
+    import glob
+
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail="文件夹不存在")
+
+    supported = [".pdf", ".docx", ".md", ".txt"]
+    files = []
+    for ext in supported:
+        files.extend(folder.rglob(f"*{ext}"))
+
+    if not files:
+        raise HTTPException(status_code=400, detail="文件夹中没有找到支持的文档（.pdf/.docx/.md/.txt）")
+
+    results = []
+    for file_path in files:
+        try:
+            text, page_info = parse_file(str(file_path))
+            chunks = chunk_text(text)
+
+            conn = get_db()
+            cur = conn.cursor()
             cur.execute(
-                "INSERT INTO chunks (doc_id, chunk_index, text, metadata) VALUES (?, ?, ?, ?)",
-                (doc_id, i, chunk_text_content, "{}")
+                "INSERT INTO documents (filename, file_type, file_path, file_size, status, chunk_count) VALUES (?, ?, ?, ?, ?, ?)",
+                (file_path.name, get_file_type(str(file_path)), str(file_path), file_path.stat().st_size, "ready", len(chunks))
             )
-            chunk_records.append({
-                "text": chunk_text_content,
-                "chunk_index": i,
-                "metadata": {}
-            })
-        
-        # 存入向量库
-        add_chunks(doc_id, chunk_records)
-        
-        cur.execute(
-            "UPDATE documents SET chunk_count = ?, status = ? WHERE id = ?",
-            (len(chunks), "ready", doc_id)
-        )
-        conn.commit()
-    except Exception as e:
-        cur.execute("UPDATE documents SET status = ? WHERE id = ?", ("error", doc_id))
-        conn.commit()
-        raise HTTPException(status_code=500, detail=f"解析失败: {str(e)}")
-    finally:
-        conn.close()
-    
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
-    doc = Document(**dict(cur.fetchone()))
-    conn.close()
-    return doc
+            doc_id = cur.lastrowid
+
+            chunk_records = []
+            for i, chunk_text_content in enumerate(chunks):
+                cur.execute(
+                    "INSERT INTO chunks (doc_id, chunk_index, text, metadata) VALUES (?, ?, ?, ?)",
+                    (doc_id, i, chunk_text_content, "{}")
+                )
+                chunk_records.append({
+                    "text": chunk_text_content,
+                    "chunk_index": i,
+                    "metadata": {}
+                })
+
+            # Embed 所有 chunk 并加入向量库
+            embedder = get_embedder()
+            texts = [r["text"] for r in chunk_records]
+            vectors = embedder.embed(texts)
+            for r, v in zip(chunk_records, vectors):
+                r["vector"] = v
+
+            add_chunks(doc_id, chunk_records)
+            conn.commit()
+
+            cur.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
+            doc = Document(**dict(cur.fetchone()))
+            results.append(doc)
+            conn.close()
+        except Exception as e:
+            # 单个文件失败不影响其他文件
+            print(f"解析失败 {file_path}: {e}")
+            continue
+
+    if not results:
+        raise HTTPException(status_code=500, detail="所有文件解析均失败")
+    return results
 
 
 @router.delete("/documents/{doc_id}", response_model=Resp)

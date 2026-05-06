@@ -4,16 +4,17 @@
       <template #header>
         <div class="card-header">
           <span>知识库文档</span>
-          <el-upload
-            :http-request="handleUpload"
-            :show-file-list="false"
-            accept=".pdf,.docx,.md,.txt"
-          >
-            <el-button type="primary" :loading="uploading">
-              <el-icon><component :is="Upload" /></el-icon>
-              上传文档
+          <div class="folder-input">
+            <el-input
+              v-model="folderPath"
+              placeholder="输入文件夹路径，如 C:\Documents"
+              style="width: 320px; margin-right: 8px"
+            />
+            <el-button type="primary" :loading="loading" @click="handleAddFolder">
+              <el-icon><component :is="FolderAdd" /></el-icon>
+              添加文件夹
             </el-button>
-          </el-upload>
+          </div>
         </div>
       </template>
 
@@ -26,7 +27,7 @@
             <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="上传时间" width="180" />
+        <el-table-column prop="created_at" label="添加时间" width="180" />
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
             <el-button
@@ -46,11 +47,12 @@
 <script setup>
 import { ref, onMounted } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
-import { Upload, Delete } from "@element-plus/icons-vue"
+import { FolderAdd, Delete } from "@element-plus/icons-vue"
 import { useKbStore } from "../stores/kb"
 
 const kbStore = useKbStore()
-const uploading = ref(false)
+const folderPath = ref("")
+const loading = ref(false)
 
 onMounted(() => kbStore.fetchDocuments())
 
@@ -58,15 +60,20 @@ function statusType(status) {
   return { ready: "success", processing: "warning", error: "danger" }[status] || "info"
 }
 
-async function handleUpload({ file }) {
-  uploading.value = true
+async function handleAddFolder() {
+  if (!folderPath.value.trim()) {
+    ElMessage.warning("请输入文件夹路径")
+    return
+  }
+  loading.value = true
   try {
-    await kbStore.uploadDocument(file)
-    ElMessage.success("上传成功")
+    await kbStore.addFolder(folderPath.value.trim())
+    ElMessage.success("添加成功")
+    folderPath.value = ""
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || "上传失败")
+    ElMessage.error(e.response?.data?.detail || "添加失败")
   } finally {
-    uploading.value = false
+    loading.value = false
   }
 }
 
@@ -85,6 +92,12 @@ async function handleDelete(id) {
 .card-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.folder-input {
+  display: flex;
   align-items: center;
 }
 </style>
