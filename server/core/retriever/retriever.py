@@ -60,6 +60,6 @@ def build_context(retrieved: list[dict]) -> str:
     parts = []
     for i, r in enumerate(retrieved, 1):
         parts.append(
-            f"[参考{i}] {r["filename"]}\n{r["text"]}"
+            f"[参考{i}] {r['filename']}\n{r['text']}"
         )
     return "\n\n".join(parts)

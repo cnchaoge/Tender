@@ -33,27 +33,27 @@ def get_collection():
 
 
 def add_chunks(doc_id: int, chunks: list[dict]):
-    """批量添加切片到向量库
-
-    chunks: [{"text": str, "chunk_index": int, "metadata": dict}]
-    """
+    """批量添加切片到向量库（需要外部已 embed 的 vectors）"""
     collection = get_collection()
     ids = [f"doc{doc_id}_chunk{i}" for i, c in enumerate(chunks)]
     documents = [c["text"] for c in chunks]
+    embeddings = [c["vector"] for c in chunks]
     metadatas = [{
         "doc_id": doc_id,
         "chunk_index": c["chunk_index"],
         **{k: v for k, v in c.get("metadata", {}).items()}
     } for i, c in enumerate(chunks)]
 
-    collection.add(ids=ids, documents=documents, metadatas=metadatas)
+    collection.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
 
 
 def query_chunks(query_text: str, top_k: int = 5) -> list[dict]:
     """检索相似切片"""
     collection = get_collection()
+    embedder = get_embedder()
+    query_vector = embedder.embed_one(query_text)
     results = collection.query(
-        query_texts=[query_text],
+        query_embeddings=[query_vector],
         n_results=top_k
     )
     return [

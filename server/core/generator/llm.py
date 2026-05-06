@@ -18,6 +18,8 @@ def get_generator():
         return DashScopeGenerator()
     elif provider == "openai":
         return OpenAIGenerator()
+    elif provider == "minimax":
+        return MiniMaxGenerator()
     else:
         raise ValueError(f"未知的 LLM provider: {provider}")
 
@@ -31,10 +33,14 @@ class BaseGenerator:
 
 
 class DeepSeekGenerator(BaseGenerator):
+    """DeepSeek API（OpenAI 兼容格式）"""
     def __init__(self):
         super().__init__(settings.DEEPSEEK_MODEL)
-        from deepseek import DeepSeek
-        self.client = DeepSeek(api_key=settings.DEEPSEEK_API_KEY)
+        from openai import OpenAI
+        self.client = OpenAI(
+            api_key=settings.DEEPSEEK_API_KEY,
+            base_url="https://api.deepseek.com",
+        )
 
     def generate(self, prompt: str, system: str = "", **kwargs) -> str:
         messages = []
@@ -76,6 +82,29 @@ class OpenAIGenerator(BaseGenerator):
         super().__init__(settings.OPENAI_MODEL)
         from openai import OpenAI
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+    def generate(self, prompt: str, system: str = "", **kwargs) -> str:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            **kwargs
+        )
+        return resp["choices"][0]["message"]["content"]
+
+
+class MiniMaxGenerator(BaseGenerator):
+    """MiniMax API（OpenAI 兼容格式）"""
+    def __init__(self):
+        super().__init__(settings.MINIMAX_MODEL)
+        from openai import OpenAI
+        self.client = OpenAI(
+            api_key=settings.MINIMAX_API_KEY,
+            base_url="https://api.minimax.chat/v1",
+        )
 
     def generate(self, prompt: str, system: str = "", **kwargs) -> str:
         messages = []
