@@ -24,7 +24,13 @@ hiddenimports = [
     'chromadb', 'chromadb.config', 'chromadb.api', 'chromadb.client',
     'chromadb.db', 'chromadb.db.duckdb', 'chromadb.segment',
     'chromadb.segment.impl.vector', 'chromadb.segment.impl.metadata',
+    'chromadb.utils.embedding_functions', 'chromadb.utils.embedding_functions._generated',
+    'chromadb.api.types', 'chromadb.api.fastapi',
     'hnswlib',
+    # ONNX / sentence-transformers (chromadb default embedding)
+    'onnxruntime', 'onnxruntime.capi.onnxruntime_inference_collection',
+    'sentence_transformers', 'sentence_transformers.models',
+    'numpy', 'numpy.core', 'numpy.random',
     # Parsers
     'pdfplumber', 'pdfminer', 'pdfminer.high_level', 'pdfminer.pdfparser',
     'pdfminer.pdfpage', 'pdfminer.pdfdocument', 'pdfminer.pdfinterp',
@@ -46,7 +52,6 @@ hiddenimports = [
     'python_dotenv', 'python_jose',
     'click',
     'yaml', 'yaml.loader',
-    'poster',
     # Routers
     'server.api.auth', 'server.api.kb', 'server.api.rag', 'server.api.bid',
     'server.api.feishu', 'server.api.admin', 'server.api.relay',
@@ -54,6 +59,12 @@ hiddenimports = [
     'server.core.relay.manager',
     'server.core.parser.document',
 ]
+
+# 收集 ONNX 模型文件（sentence-transformers / chromadb default embedding）
+from PyInstaller.utils.hooks import collect_data_files
+datas += collect_data_files('sentence_transformers')
+datas += collect_data_files('onnxruntime')
+
 
 a = Analysis(
     ['server/main.py'],
