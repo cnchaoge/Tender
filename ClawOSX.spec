@@ -16,6 +16,7 @@ datas = [
 # sentence-transformers 模型文件
 datas += collect_data_files('sentence_transformers')
 datas += collect_data_files('onnxruntime')
+datas += collect_data_files('tokenizers')
 
 # hidden imports
 hiddenimports = [
@@ -35,6 +36,12 @@ hiddenimports = [
     'docx', 'docx.oxml', 'docx.table', 'docx.text.paragraph',
     'pptx', 'pptx.presentation', 'pptx.util', 'pptx.shapes',
     'markdown_it', 'markdown_it.main', 'markdown_it.rules',
+    # ONNX / sentence-transformers (chromadb default embedding)
+    'onnxruntime', 'onnxruntime.capi.onnxruntime_inference_collection',
+    'sentence_transformers', 'sentence_transformers.models',
+    'tokenizers', 'tokenizers.implementations', 'tokenizers.models',
+    'filelock', 'huggingface_hub',
+    'numpy', 'numpy.core', 'numpy.random',
     # RAG / embedding
     'openai', 'dashscope',
     'httpx', 'anyio',
