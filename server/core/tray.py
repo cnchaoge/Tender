@@ -3,6 +3,19 @@ ClawOS X - 系统托盘
 """
 import threading, webbrowser
 
+_tray = None
+_restart_callback = None
+_tk_root = None
+_settings_win = None
+
+def _get_tk_root():
+    global _tk_root
+    if _tk_root is None:
+        import tkinter as tk
+        _tk_root = tk.Tk()
+        _tk_root.withdraw()  # 隐藏空白主窗口
+    return _tk_root
+
 def _create_icon_image():
     from PIL import Image, ImageDraw
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
@@ -10,9 +23,6 @@ def _create_icon_image():
     draw.ellipse([4, 4, 60, 60], fill=(37, 99, 235, 255))
     draw.text((12, 14), "CX", fill=(255, 255, 255, 255))
     return img
-
-_tray = None
-_restart_callback = None
 
 def _validate_dashscope_key(api_key: str) -> bool:
     """验证 DashScope API Key 是否有效"""
@@ -29,11 +39,20 @@ def _validate_dashscope_key(api_key: str) -> bool:
         return False
 
 def _show_settings():
+    global _settings_win
+    if _settings_win is not None:
+        try:
+            _settings_win.focus()
+        except Exception:
+            _settings_win = None
+        return
+
     import tkinter as tk
     from server.config import get_settings, update_env
 
     settings = get_settings()
-    win = tk.Toplevel()
+    root = _get_tk_root()
+    _settings_win = win = tk.Toplevel(root)
     win.title("ClawOS X 设置")
     win.geometry("500x180")
     win.resizable(False, False)
@@ -45,7 +64,9 @@ def _show_settings():
     ai_frame = tk.LabelFrame(win, text=" AI 模型 ", padx=8, pady=4)
     ai_frame.grid(row=0, column=0, columnspan=2, sticky="we", padx=8, pady=(8, 4))
     tk.Label(ai_frame, text="DashScope API Key:", anchor="w").grid(row=0, column=0, sticky="w", pady=3)
-    tk.Entry(ai_frame, textvariable=v_dashscope, width=50).grid(row=0, column=1, padx=8, pady=3)
+
+    e_key = tk.Entry(ai_frame, textvariable=v_dashscope, width=50)
+    e_key.grid(row=0, column=1, padx=8, pady=3)
 
     tk.Label(win, textvariable=v_msg, fg="gray").grid(row=1, column=0, columnspan=2, pady=4)
 
@@ -67,14 +88,22 @@ def _show_settings():
             return
         update_env("DASHSCOPE_API_KEY", key)
         win.destroy()
+        global _settings_win
+        _settings_win = None
         if _restart_callback:
             _restart_callback()
 
+    def on_close():
+        win.destroy()
+        global _settings_win
+        _settings_win = None
+
+    win.protocol("WM_DELETE_WINDOW", on_close)
     tk.Button(btn_frame, text="保存并重启", command=on_save, width=14,
               bg="#2563eb", fg="white").grid(row=0, column=0, padx=8)
-    tk.Button(btn_frame, text="取消", command=win.destroy, width=14).grid(row=0, column=1, padx=8)
+    tk.Button(btn_frame, text="取消", command=on_close, width=14).grid(row=0, column=1, padx=8)
     win.columnconfigure(1, weight=1)
-    win.wait_window()
+    e_key.focus_set()
 
 def _on_open(icon, item):
     webbrowser.open("http://localhost:8000")
@@ -95,6 +124,9 @@ def _run_tray():
     global _tray
     import pystray
     from pystray import MenuItem as MI
+
+    # 初始化 tkinter 主窗口（必须在后台线程之前）
+    _get_tk_root()
 
     img = _create_icon_image()
     menu = pystray.Menu(
