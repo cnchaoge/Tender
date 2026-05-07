@@ -58,14 +58,14 @@ class DashScopeEmbedder:
 
 
 class BGEEmbedder:
-    """本地 BGE Embedding"""
+    """本地 BGE Embedding（不依赖 sentence_transformers）"""
 
     def __init__(self):
-        from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(settings.BGE_MODEL_PATH or "BAAI/bge-large-zh-v1.5")
+        from server.core.embedder.bge_embedder import encode_texts
+        self._encode = encode_texts
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        return self.model.encode(texts, normalize_embeddings=True).tolist()
+        return [emb.tolist() if hasattr(emb, 'tolist') else emb for emb in self._encode(texts)]
 
     def embed_one(self, text: str) -> list[float]:
         return self.embed([text])[0]
