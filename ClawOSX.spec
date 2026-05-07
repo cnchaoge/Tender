@@ -17,6 +17,8 @@ datas = [
 datas += collect_data_files('sentence_transformers')
 datas += collect_data_files('onnxruntime')
 datas += collect_data_files('tokenizers')
+datas += collect_data_files('PIL')
+datas += collect_data_files('pystray')
 
 # hidden imports
 _base_hiddenimports = [
@@ -61,6 +63,10 @@ _base_hiddenimports = [
     'server.db.sqlite', 'server.config',
     'server.core.relay.manager',
     'server.core.parser.document',
+    'server.core.tray',
+    # Tray
+    'pystray', 'pystray._win32', 'pystray._util',
+    'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL._imaging',
 ]
 
 # 合并 chromadb 所有子模块（去重）
