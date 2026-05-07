@@ -120,6 +120,15 @@ def parse_file(file_path: str) -> tuple[str, list[dict]]:
     """根据文件类型自动选择解析器"""
     ext = Path(file_path).suffix.lower()
 
+    # 检测 SQLite 数据库（有些文件扩展名是 pdf/docx 但实际是 SQLite）
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(16)
+        if header[:16] == b'SQLite format 3\x00':
+            raise ValueError(f"skip: file is SQLite database, not {ext}")
+    except (OSError, ValueError):
+        pass
+
     parsers = {
         ".pdf": parse_pdf,
         ".docx": parse_docx,
