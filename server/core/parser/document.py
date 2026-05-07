@@ -90,6 +90,16 @@ def parse_pptx(file_path: str) -> tuple[str, list[dict]]:
 
 def parse_markdown(file_path: str) -> tuple[str, list[dict]]:
     """解析 Markdown"""
+    # 跳过二进制文件（SQLite 数据库、或其他非文本文件）
+    with open(file_path, "rb") as f:
+        header = f.read(32)
+    # SQLite 数据库
+    if header[:16] == b'SQLite format 3\x00':
+        raise ValueError("skip: file is SQLite database")
+    # 包含空字节的二进制文件
+    if b'\x00' in header:
+        raise ValueError("skip: file is binary")
+
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
     lines = content.split("\n")
