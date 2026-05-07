@@ -1,20 +1,11 @@
 """
 ClawOS X - 系统托盘
+pystray 做托盘，settings 用 PowerShell 独立窗口
 """
-import threading, webbrowser
+import threading, webbrowser, subprocess, tempfile, os
 
 _tray = None
 _restart_callback = None
-_tk_root = None
-_settings_win = None
-
-def _get_tk_root():
-    global _tk_root
-    if _tk_root is None:
-        import tkinter as tk
-        _tk_root = tk.Tk()
-        _tk_root.withdraw()  # 隐藏空白主窗口
-    return _tk_root
 
 def _create_icon_image():
     from PIL import Image, ImageDraw
@@ -24,92 +15,112 @@ def _create_icon_image():
     draw.text((12, 14), "CX", fill=(255, 255, 255, 255))
     return img
 
-def _validate_dashscope_key(api_key: str) -> bool:
-    """验证 DashScope API Key 是否有效"""
-    import httpx
-    try:
-        resp = httpx.post(
-            "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": "text-embedding-v3", "input": {"texts": ["test"]}},
-            timeout=10,
-        )
-        return resp.status_code == 200
-    except Exception:
-        return False
-
-def _show_settings():
-    global _settings_win
-    if _settings_win is not None:
-        try:
-            _settings_win.focus()
-        except Exception:
-            _settings_win = None
-        return
-
-    import tkinter as tk
+def _show_settings_ps():
+    """用 PowerShell 弹窗输入 API Key，保存后触发重启"""
     from server.config import get_settings, update_env
 
     settings = get_settings()
-    root = _get_tk_root()
-    _settings_win = win = tk.Toplevel(root)
-    win.title("ClawOS X 设置")
-    win.geometry("500x180")
-    win.resizable(False, False)
-    win.attributes("-topmost", True)
 
-    v_dashscope = tk.StringVar(value=settings.DASHSCOPE_API_KEY)
-    v_msg = tk.StringVar(value="")
+    script = f'''
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 
-    ai_frame = tk.LabelFrame(win, text=" AI 模型 ", padx=8, pady=4)
-    ai_frame.grid(row=0, column=0, columnspan=2, sticky="we", padx=8, pady=(8, 4))
-    tk.Label(ai_frame, text="DashScope API Key:", anchor="w").grid(row=0, column=0, sticky="w", pady=3)
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "ClawOS X 设置"
+$form.Size = New-Object System.Drawing.Size(520, 160)
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false
+$form.TopMost = $true
+$form.StartPosition = "CenterScreen"
 
-    e_key = tk.Entry(ai_frame, textvariable=v_dashscope, width=50)
-    e_key.grid(row=0, column=1, padx=8, pady=3)
+$lbl = New-Object System.Windows.Forms.Label
+$lbl.Location = New-Object System.Drawing.Point(10, 20)
+$lbl.Size = New-Object System.Drawing.Size(150, 20)
+$lbl.Text = "DashScope API Key:"
+$form.Controls.Add($lbl)
 
-    tk.Label(win, textvariable=v_msg, fg="gray").grid(row=1, column=0, columnspan=2, pady=4)
+$txt = New-Object System.Windows.Forms.TextBox
+$txt.Location = New-Object System.Drawing.Point(165, 17)
+$txt.Size = New-Object System.Drawing.Size(320, 20)
+$txt.Text = "{settings.DASHSCOPE_API_KEY}"
+$form.Controls.Add($txt)
 
-    btn_frame = tk.Frame(win)
-    btn_frame.grid(row=2, column=0, columnspan=2, pady=8)
+$msg = New-Object System.Windows.Forms.Label
+$msg.Location = New-Object System.Drawing.Point(165, 45)
+$msg.Size = New-Object System.Drawing.Size(320, 16)
+$msg.Text = ""
+$msg.ForeColor = [System.Drawing.Color]::Gray
+$form.Controls.Add($msg)
 
-    def on_save():
-        key = v_dashscope.get().strip()
-        if not key:
-            v_msg.set("API Key 不能为空")
-            v_msg.config(fg="red")
-            return
-        v_msg.set("正在验证...")
-        v_msg.config(fg="gray")
-        win.update()
-        if not _validate_dashscope_key(key):
-            v_msg.set("验证失败：API Key 无效或网络超时")
-            v_msg.config(fg="red")
-            return
-        update_env("DASHSCOPE_API_KEY", key)
-        win.destroy()
-        global _settings_win
-        _settings_win = None
-        if _restart_callback:
-            _restart_callback()
+$btnOK = New-Object System.Windows.Forms.Button
+$btnOK.Location = New-Object System.Drawing.Point(230, 75)
+$btnOK.Size = New-Object System.Drawing.Size(100, 25)
+$btnOK.Text = "保存并重启"
+$btnOK.FlatStyle = "Popup"
+$btnOK.BackColor = [System.Drawing.Color]::FromArgb(37,99,235)
+$btnOK.ForeColor = [System.Drawing.Color]::White
 
-    def on_close():
-        win.destroy()
-        global _settings_win
-        _settings_win = None
+$btnCancel = New-Object System.Windows.Forms.Button
+$btnCancel.Location = New-Object System.Drawing.Point(340, 75)
+$btnCancel.Size = New-Object System.Drawing.Size(100, 25)
+$btnCancel.Text = "取消"
 
-    win.protocol("WM_DELETE_WINDOW", on_close)
-    tk.Button(btn_frame, text="保存并重启", command=on_save, width=14,
-              bg="#2563eb", fg="white").grid(row=0, column=0, padx=8)
-    tk.Button(btn_frame, text="取消", command=on_close, width=14).grid(row=0, column=1, padx=8)
-    win.columnconfigure(1, weight=1)
-    e_key.focus_set()
+$done = $false
+$key = ""
+
+$btnOK.Add_Click({{
+    $script:key = $txt.Text.Trim()
+    if (-not $script:key) {{
+        $msg.Text = "API Key 不能为空"
+        $msg.ForeColor = [System.Drawing.Color]::Red
+        return
+    }}
+    $script:done = $true
+    $form.Close()
+}})
+$btnCancel.Add_Click({{ $form.Close() }})
+$form.AcceptButton = $btnOK
+$form.CancelButton = $btnCancel
+
+$form.Controls.Add($btnOK)
+$form.Controls.Add($btnCancel)
+$txt.focus()
+$form.ShowDialog() | Out-Null
+
+if ($done -and $key) {{
+    $key | Out-File -FilePath "$env:TEMP\\clawosx_apikey.txt" -Encoding UTF8
+}}
+'''
+
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.ps1', delete=False, encoding='utf-8')
+    tmp.write(script)
+    tmp.close()
+
+    subprocess.run(['powershell', '-ExecutionPolicy', 'Bypass', '-File', tmp.name],
+                   capture_output=True)
+    try:
+        os.unlink(tmp.name)
+    except Exception:
+        pass
+
+    key_file = os.path.join(os.environ.get('TEMP', ''), 'clawosx_apikey.txt')
+    if os.path.exists(key_file):
+        with open(key_file, 'r', encoding='utf-8') as f:
+            key = f.read().strip()
+        try:
+            os.unlink(key_file)
+        except Exception:
+            pass
+        if key:
+            update_env("DASHSCOPE_API_KEY", key)
+            if _restart_callback:
+                _restart_callback()
 
 def _on_open(icon, item):
     webbrowser.open("http://localhost:8000")
 
 def _on_settings(icon, item):
-    _show_settings()
+    threading.Thread(target=_show_settings_ps, daemon=True).start()
 
 def _on_restart(icon, item):
     if _restart_callback:
@@ -124,9 +135,6 @@ def _run_tray():
     global _tray
     import pystray
     from pystray import MenuItem as MI
-
-    # 初始化 tkinter 主窗口（必须在后台线程之前）
-    _get_tk_root()
 
     img = _create_icon_image()
     menu = pystray.Menu(
