@@ -30,6 +30,8 @@ class DashScopeEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         import httpx
+        if not self.api_key:
+            raise ValueError("DashScope API KEY 未配置，请在设置中配置 DASHSCOPE_API_KEY")
         results = []
         # DashScope 每批最多 10 条
         for i in range(0, len(texts), 10):
