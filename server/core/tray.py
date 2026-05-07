@@ -14,6 +14,20 @@ def _create_icon_image():
 _tray = None
 _restart_callback = None
 
+def _validate_dashscope_key(api_key: str) -> bool:
+    """验证 DashScope API Key 是否有效"""
+    import httpx
+    try:
+        resp = httpx.post(
+            "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": "text-embedding-v3", "input": {"texts": ["test"]}},
+            timeout=10,
+        )
+        return resp.status_code == 200
+    except Exception:
+        return False
+
 def _show_settings():
     import tkinter as tk
     from server.config import get_settings, update_env
@@ -21,43 +35,37 @@ def _show_settings():
     settings = get_settings()
     win = tk.Toplevel()
     win.title("ClawOS X 设置")
-    win.geometry("500x300")
+    win.geometry("500x180")
     win.resizable(False, False)
     win.attributes("-topmost", True)
 
     v_dashscope = tk.StringVar(value=settings.DASHSCOPE_API_KEY)
-    v_feishu_app_id = tk.StringVar(value=settings.FEISHU_APP_ID)
-    v_feishu_app_secret = tk.StringVar(value=settings.FEISHU_APP_SECRET)
-    v_feishu_bot_token = tk.StringVar(value=settings.FEISHU_BOT_TOKEN)
+    v_msg = tk.StringVar(value="")
 
     ai_frame = tk.LabelFrame(win, text=" AI 模型 ", padx=8, pady=4)
     ai_frame.grid(row=0, column=0, columnspan=2, sticky="we", padx=8, pady=(8, 4))
     tk.Label(ai_frame, text="DashScope API Key:", anchor="w").grid(row=0, column=0, sticky="w", pady=3)
     tk.Entry(ai_frame, textvariable=v_dashscope, width=50).grid(row=0, column=1, padx=8, pady=3)
 
-    feishu_frame = tk.LabelFrame(win, text=" 飞书配置 ", padx=8, pady=4)
-    feishu_frame.grid(row=1, column=0, columnspan=2, sticky="we", padx=8, pady=4)
-    tk.Label(feishu_frame, text="App ID:", anchor="w").grid(row=0, column=0, sticky="w", pady=3)
-    tk.Entry(feishu_frame, textvariable=v_feishu_app_id, width=50).grid(row=0, column=1, padx=8, pady=3)
-    tk.Label(feishu_frame, text="App Secret:", anchor="w").grid(row=1, column=0, sticky="w", pady=3)
-    tk.Entry(feishu_frame, textvariable=v_feishu_app_secret, width=50, show="*").grid(row=1, column=1, padx=8, pady=3)
-    tk.Label(feishu_frame, text="Bot Token:", anchor="w").grid(row=2, column=0, sticky="w", pady=3)
-    tk.Entry(feishu_frame, textvariable=v_feishu_bot_token, width=50, show="*").grid(row=2, column=1, padx=8, pady=3)
-
-    tk.Label(win, text="保存后将重启服务生效", fg="gray").grid(row=2, column=0, columnspan=2, pady=4)
+    tk.Label(win, textvariable=v_msg, fg="gray").grid(row=1, column=0, columnspan=2, pady=4)
 
     btn_frame = tk.Frame(win)
-    btn_frame.grid(row=3, column=0, columnspan=2, pady=8)
+    btn_frame.grid(row=2, column=0, columnspan=2, pady=8)
 
     def on_save():
-        for k, v in [
-            ("DASHSCOPE_API_KEY", v_dashscope.get().strip()),
-            ("FEISHU_APP_ID", v_feishu_app_id.get().strip()),
-            ("FEISHU_APP_SECRET", v_feishu_app_secret.get().strip()),
-            ("FEISHU_BOT_TOKEN", v_feishu_bot_token.get().strip()),
-        ]:
-            if v:
-                update_env(k, v)
+        key = v_dashscope.get().strip()
+        if not key:
+            v_msg.set("API Key 不能为空")
+            v_msg.config(fg="red")
+            return
+        v_msg.set("正在验证...")
+        v_msg.config(fg="gray")
+        win.update()
+        if not _validate_dashscope_key(key):
+            v_msg.set("验证失败：API Key 无效或网络超时")
+            v_msg.config(fg="red")
+            return
+        update_env("DASHSCOPE_API_KEY", key)
         win.destroy()
         if _restart_callback:
             _restart_callback()
