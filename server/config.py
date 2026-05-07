@@ -1,13 +1,16 @@
 """
 ClawOS X - 配置管理
 """
-import os
+import os, sys
 from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
-# 项目根目录
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+# 项目根目录：dev 时用 __file__ 向上找，打包时用 exe 所在目录
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
@@ -61,6 +64,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "allow"
 
 
@@ -74,7 +78,7 @@ def update_env(key: str, value: str):
     env_path = BASE_DIR / ".env"
     lines = []
     if env_path.exists():
-        lines = env_path.read_text().splitlines()
+        lines = env_path.read_text(encoding="utf-8").splitlines()
     
     found = False
     new_lines = []
@@ -87,6 +91,6 @@ def update_env(key: str, value: str):
     if not found:
         new_lines.append(f"{key}={value}")
     
-    env_path.write_text("\n".join(new_lines) + "\n")
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
     # 清除缓存，下次 get_settings() 会重新读取
     get_settings.cache_clear()

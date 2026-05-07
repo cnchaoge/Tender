@@ -2,7 +2,7 @@
 ClawOS X - Embedding 模型
 支持 通义 / BGE
 """
-from server.config import get_settings
+from server.config import get_settings, BASE_DIR
 
 settings = get_settings()
 
@@ -10,6 +10,11 @@ settings = get_settings()
 def get_embedder():
     """根据配置返回 Embedding 实例"""
     provider = settings.EMBED_PROVIDER
+    try:
+        with open(BASE_DIR / "embedder_debug.txt", "a", encoding="utf-8") as f:
+            f.write(f"EMBED_PROVIDER={provider!r}, BASE_DIR={BASE_DIR!r}\n")
+    except Exception:
+        pass
 
     if provider == "dashscope":
         return DashScopeEmbedder()

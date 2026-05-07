@@ -16,11 +16,23 @@ def _create_icon_image():
     return img
 
 def _show_settings_ps():
-    """用 PowerShell 弹窗输入 API Key，保存后触发重启"""
+    """用 PowerShell 弹窗：选模型 → 填Key → 验证 → 保存"""
     print("[tray] _show_settings_ps called")
     from server.config import get_settings, update_env
+    from server.api.admin import verify_model_config, ModelConfigReq
 
     settings = get_settings()
+
+    # 先调用 verify 接口获取当前状态
+    current_valid = False
+    current_msg = ""
+    try:
+        req = ModelConfigReq(provider=settings.LLM_PROVIDER, api_key=settings.DASHSCOPE_API_KEY if settings.LLM_PROVIDER == "dashscope" else settings.DEEPSEEK_API_KEY)
+        resp = verify_model_config(req)
+        current_valid = resp.valid
+        current_msg = resp.message
+    except Exception as e:
+        current_msg = f"验证异常: {e}"
 
     script = f'''
 Add-Type -AssemblyName System.Windows.Forms
@@ -28,68 +40,123 @@ Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "ClawOS X 设置"
-$form.Size = New-Object System.Drawing.Size(520, 160)
+$form.Size = New-Object System.Drawing.Size(480, 220)
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 $form.TopMost = $true
 $form.StartPosition = "CenterScreen"
 
-$lbl = New-Object System.Windows.Forms.Label
-$lbl.Location = New-Object System.Drawing.Point(10, 20)
-$lbl.Size = New-Object System.Drawing.Size(150, 20)
-$lbl.Text = "DashScope API Key:"
-$form.Controls.Add($lbl)
+# --- 行1: 模型选择 ---
+$lblModel = New-Object System.Windows.Forms.Label
+$lblModel.Location = New-Object System.Drawing.Point(10, 15)
+$lblModel.Size = New-Object System.Drawing.Size(70, 20)
+$lblModel.Text = "模型:"
+$form.Controls.Add($lblModel)
 
-$txt = New-Object System.Windows.Forms.TextBox
-$txt.Location = New-Object System.Drawing.Point(165, 17)
-$txt.Size = New-Object System.Drawing.Size(320, 20)
-$txt.Text = "{settings.DASHSCOPE_API_KEY}"
-$form.Controls.Add($txt)
+$cmbModel = New-Object System.Windows.Forms.ComboBox
+$cmbModel.Location = New-Object System.Drawing.Point(85, 12)
+$cmbModel.Size = New-Object System.Drawing.Size(160, 20)
+$cmbModel.DropDownStyle = "DropDownList"
+$cmbModel.Items.Add("dashscope") | Out-Null
+$cmbModel.Items.Add("deepseek") | Out-Null
+$cmbModel.SelectedItem = "{settings.LLM_PROVIDER}"
+$form.Controls.Add($cmbModel)
 
-$msg = New-Object System.Windows.Forms.Label
-$msg.Location = New-Object System.Drawing.Point(165, 45)
-$msg.Size = New-Object System.Drawing.Size(320, 16)
-$msg.Text = ""
-$msg.ForeColor = [System.Drawing.Color]::Gray
-$form.Controls.Add($msg)
+# --- 行2: API Key ---
+$lblKey = New-Object System.Windows.Forms.Label
+$lblKey.Location = New-Object System.Drawing.Point(10, 48)
+$lblKey.Size = New-Object System.Drawing.Size(70, 20)
+$lblKey.Text = "API Key:"
+$form.Controls.Add($lblKey)
 
-$btnOK = New-Object System.Windows.Forms.Button
-$btnOK.Location = New-Object System.Drawing.Point(230, 75)
-$btnOK.Size = New-Object System.Drawing.Size(100, 25)
-$btnOK.Text = "保存并重启"
-$btnOK.FlatStyle = "Flat"
-$btnOK.BackColor = [System.Drawing.Color]::FromArgb(37,99,235)
-$btnOK.ForeColor = [System.Drawing.Color]::White
+$txtKey = New-Object System.Windows.Forms.TextBox
+$txtKey.Location = New-Object System.Drawing.Point(85, 45)
+$txtKey.Size = New-Object System.Drawing.Size(370, 20)
+$txtKey.Text = ""
+$txtKey.PasswordChar = '*'
+$form.Controls.Add($txtKey)
+
+# --- 行3: 验证消息 ---
+$lblMsg = New-Object System.Windows.Forms.Label
+$lblMsg.Location = New-Object System.Drawing.Point(85, 72)
+$lblMsg.Size = New-Object System.Drawing.Size(370, 16)
+$lblMsg.Text = "{current_msg}"
+$lblMsg.ForeColor = If({str(current_valid).lower()}) {{[System.Drawing.Color]::FromArgb(34,197,94)}} Else {{[System.Drawing.Color]::FromArgb(239,68,68)}}
+$form.Controls.Add($lblMsg)
+
+# --- 行4: 按钮 ---
+$btnVerify = New-Object System.Windows.Forms.Button
+$btnVerify.Location = New-Object System.Drawing.Point(85, 98)
+$btnVerify.Size = New-Object System.Drawing.Size(90, 28)
+$btnVerify.Text = "验证"
+$btnVerify.FlatStyle = "Flat"
+$form.Controls.Add($btnVerify)
+
+$btnSave = New-Object System.Windows.Forms.Button
+$btnSave.Location = New-Object System.Drawing.Point(185, 98)
+$btnSave.Size = New-Object System.Drawing.Size(90, 28)
+$btnSave.Text = "保存并重启"
+$btnSave.FlatStyle = "Flat"
+$btnSave.BackColor = [System.Drawing.Color]::FromArgb(37,99,235)
+$btnSave.ForeColor = [System.Drawing.Color]::White
+$btnSave.Enabled = $false
+$form.Controls.Add($btnSave)
 
 $btnCancel = New-Object System.Windows.Forms.Button
-$btnCancel.Location = New-Object System.Drawing.Point(340, 75)
-$btnCancel.Size = New-Object System.Drawing.Size(100, 25)
+$btnCancel.Location = New-Object System.Drawing.Point(285, 98)
+$btnCancel.Size = New-Object System.Drawing.Size(90, 28)
 $btnCancel.Text = "取消"
+$btnCancel.FlatStyle = "Flat"
+$form.Controls.Add($btnCancel)
 
 $done = $false
-$key = ""
+$saved_key = ""
 
-$btnOK.Add_Click({{
-    $script:key = $txt.Text.Trim()
-    if (-not $script:key) {{
-        $msg.Text = "API Key 不能为空"
-        $msg.ForeColor = [System.Drawing.Color]::Red
-        return
+# Verify button
+$btnVerify.Add_Click({{
+    $provider = $cmbModel.SelectedItem
+    $apiKey = $txtKey.Text.Trim()
+    If (-not $apiKey) {{
+        $lblMsg.Text = "API Key 不能为空"
+        $lblMsg.ForeColor = [System.Drawing.Color]::FromArgb(239,68,68)
+        Return
     }}
+    $body = @{{provider=$provider;api_key=$apiKey;model=""}} | ConvertTo-Json
+    Try {{
+        $resp = Invoke-RestMethod -Uri "http://localhost:8000/api/admin/model/verify" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 10
+        If ($resp.valid) {{
+            $lblMsg.Text = "验证成功: " + $resp.message
+            $lblMsg.ForeColor = [System.Drawing.Color]::FromArgb(34,197,94)
+            $btnSave.Enabled = $true
+        }} Else {{
+            $lblMsg.Text = "验证失败: " + $resp.message
+            $lblMsg.ForeColor = [System.Drawing.Color]::FromArgb(239,68,68)
+            $btnSave.Enabled = $false
+        }}
+    }} Catch {{
+        $lblMsg.Text = "验证异常: " + $_.Exception.Message
+        $lblMsg.ForeColor = [System.Drawing.Color]::FromArgb(239,68,68)
+        $btnSave.Enabled = $false
+    }}
+}})
+
+# Save button
+$btnSave.Add_Click({{
+    $script:saved_key = $txtKey.Text.Trim()
     $script:done = $true
     $form.Close()
 }})
+
 $btnCancel.Add_Click({{ $form.Close() }})
-$form.AcceptButton = $btnOK
+$form.AcceptButton = $btnSave
 $form.CancelButton = $btnCancel
 
-$form.Controls.Add($btnOK)
-$form.Controls.Add($btnCancel)
-$txt.focus()
+$txtKey.focus()
 $form.ShowDialog() | Out-Null
 
-if ($done -and $key) {{
-    $key | Out-File -FilePath "$env:TEMP\\clawosx_apikey.txt" -Encoding UTF8
+If ($done -and $saved_key) {{
+    $provider = $cmbModel.SelectedItem
+    "$provider`t$saved_key" | Out-File -FilePath "$env:TEMP\\clawosx_settings.txt" -Encoding UTF8
 }}
 '''
 
@@ -106,18 +173,27 @@ if ($done -and $key) {{
     except Exception:
         pass
 
-    key_file = os.path.join(os.environ.get('TEMP', ''), 'clawosx_apikey.txt')
-    if os.path.exists(key_file):
-        with open(key_file, 'r', encoding='utf-8') as f:
-            key = f.read().strip()
+    settings_file = os.path.join(os.environ.get('TEMP', ''), 'clawosx_settings.txt')
+    if os.path.exists(settings_file):
+        with open(settings_file, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
         try:
-            os.unlink(key_file)
+            os.unlink(settings_file)
         except Exception:
             pass
-        if key:
-            update_env("DASHSCOPE_API_KEY", key)
+        if '\t' in content:
+            provider, api_key = content.split('\t', 1)
+            provider = provider.strip()
+            api_key = api_key.strip()
+            if provider == "deepseek":
+                update_env("LLM_PROVIDER", "deepseek")
+                update_env("DEEPSEEK_API_KEY", api_key)
+            else:
+                update_env("LLM_PROVIDER", "dashscope")
+                update_env("DASHSCOPE_API_KEY", api_key)
             if _restart_callback:
                 _restart_callback()
+            print(f"[tray] Settings saved, provider={provider}")
 
 def _on_open(icon, item):
     webbrowser.open("http://localhost:8000")

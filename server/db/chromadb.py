@@ -3,7 +3,8 @@ ClawOS X - ChromaDB 向量数据库
 """
 import chromadb
 from chromadb.config import Settings
-from server.config import get_settings
+from server.config import get_settings, BASE_DIR
+from server.core.embedder.embedder import get_embedder
 
 settings = get_settings()
 
@@ -50,6 +51,11 @@ def add_chunks(doc_id: int, chunks: list[dict]):
 def query_chunks(query_text: str, top_k: int = 5) -> list[dict]:
     """检索相似切片"""
     collection = get_collection()
+    try:
+        with open(BASE_DIR / "embedder_debug.txt", "a", encoding="utf-8") as f:
+            f.write("query_chunks called\n")
+    except Exception:
+        pass
     embedder = get_embedder()
     query_vector = embedder.embed_one(query_text)
     results = collection.query(

@@ -3,6 +3,10 @@ ClawOS X - FastAPI 入口
 """
 import sys, os, time
 from pathlib import Path
+
+# PyInstaller 打包后切到 exe 所在目录，确保 .env 和 data 路径正确
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    os.chdir(Path(sys.executable).parent)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -99,30 +103,21 @@ def _start_server_thread():
     time.sleep(1.5)
 
 
-def _stop_server():
-    global _server_thread, _server_stop_event
-    if _server_stop_event:
-        _server_stop_event.clear()
-    # 等待线程退出
-    if _server_thread and _server_thread.is_alive():
-        import uvicorn
-        # 强制终止（通过 os.kill 的方式不太优雅，换个思路）
-        # 实际上 pystray 回调在主线程，uvicorn 在子线程，直接让进程退出
-        # 更好的方式：通知 uvicorn 优雅关闭
-        os._exit(0)  # 最简单的重启方式
-
-
-# ---------------------------------------------------------------------------
-# 托盘
-# ---------------------------------------------------------------------------
 def _tray_restart_callback(stop=False):
     if stop:
-        _stop_server()
-    else:
-        # 保存后重启：停止并重新启动
-        _stop_server()
-        time.sleep(0.5)
-        _start_server_thread()
+        os._exit(0)
+    # 重启：先启动新进程，再退出当前
+    import subprocess, sys
+    try:
+        # DETACHED_PROCESS 让新进程完全独立，不继承控制台
+        si = subprocess.STARTUPINFO()
+        si.dwFlags = subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 1  # SW_SHOWNORMAL
+        subprocess.Popen([sys.executable], cwd=os.getcwd(),
+                         startupinfo=si, creationflags=subprocess.DETACHED_PROCESS)
+    except Exception:
+        pass
+    os._exit(0)
 
 
 def _setup_tray():
