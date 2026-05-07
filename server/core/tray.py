@@ -17,6 +17,7 @@ def _create_icon_image():
 
 def _show_settings_ps():
     """用 PowerShell 弹窗输入 API Key，保存后触发重启"""
+    print("[tray] _show_settings_ps called")
     from server.config import get_settings, update_env
 
     settings = get_settings()
@@ -56,7 +57,7 @@ $btnOK = New-Object System.Windows.Forms.Button
 $btnOK.Location = New-Object System.Drawing.Point(230, 75)
 $btnOK.Size = New-Object System.Drawing.Size(100, 25)
 $btnOK.Text = "保存并重启"
-$btnOK.FlatStyle = "Popup"
+$btnOK.FlatStyle = "Flat"
 $btnOK.BackColor = [System.Drawing.Color]::FromArgb(37,99,235)
 $btnOK.ForeColor = [System.Drawing.Color]::White
 
@@ -92,12 +93,14 @@ if ($done -and $key) {{
 }}
 '''
 
-    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.ps1', delete=False, encoding='utf-8')
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.ps1', delete=False, encoding='gbk')
     tmp.write(script)
     tmp.close()
 
-    subprocess.run(['powershell', '-ExecutionPolicy', 'Bypass', '-File', tmp.name],
-                   capture_output=True)
+    result = subprocess.run(['powershell', '-ExecutionPolicy', 'Bypass', '-File', tmp.name],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[tray] PowerShell error: {result.stderr}")
     try:
         os.unlink(tmp.name)
     except Exception:
