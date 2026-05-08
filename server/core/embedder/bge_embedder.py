@@ -7,7 +7,6 @@ from typing import Optional
 from pathlib import Path
 
 import numpy as np
-from huggingface_hub import hf_hub_download, snapshot_download
 import torch
 from torch import nn
 import tokenizers
@@ -15,25 +14,24 @@ import tokenizers
 
 # Cache dir for BGE model
 MODEL_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
-MODEL_ID = "BAAI--bge-large-zh-v1.5"
+MODEL_ID = "BAAI/bge-large-zh-v1.5"  # HuggingFace repo ID (forward slashes)
+LOCAL_MODEL_FOLDER = "models--BAAI--bge-large-zh-v1.5"  # Local cache folder name (double hyphens)
 
 
 def _get_model_path() -> str:
-    """Get the local path to the BGE model."""
-    # First check if already downloaded
-    model_dir = MODEL_CACHE / f"models--{MODEL_ID.replace('/', '--')}"
-    if model_dir.exists():
-        # Find the snapshot dir
-        for d in model_dir.iterdir():
-            if d.is_dir() and not d.name.startswith('.'):
-                blks_file = d / "model.safetensors"
-                if blks_file.exists():
-                    return str(d)
-    # Fallback: use snapshot_download (will reuse cache)
-    try:
-        return snapshot_download(MODEL_ID, cache_dir=str(MODEL_CACHE))
-    except Exception as e:
-        raise RuntimeError(f"Failed to get BGE model path: {e}")
+    """Get the local path to the BGE model (already downloaded)."""
+    model_dir = MODEL_CACHE / LOCAL_MODEL_FOLDER
+    if not model_dir.exists():
+        raise RuntimeError(f"BGE model not found at {model_dir}. Please run download_bge.py first.")
+
+    # Find the actual model snapshot dir inside
+    for d in model_dir.iterdir():
+        if d.is_dir() and not d.name.startswith('.'):
+            blks_file = d / "model.safetensors"
+            if blks_file.exists():
+                return str(d)
+
+    raise RuntimeError(f"BGE model snapshot not found in {model_dir}")
 
 
 class BGEModel:
@@ -49,12 +47,12 @@ class BGEModel:
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        # Load tokenizer
-        tokenizer_path = hf_hub_download(
-            repo_id=MODEL_ID,
-            filename="tokenizer.json",
-            cache_dir=str(MODEL_CACHE),
-        )
+        # Load tokenizer from local path
+        tokenizer_path = os.path.join(model_path, "tokenizer.json")
+        if not os.path.exists(tokenizer_path):
+            tokenizer_config_path = os.path.join(model_path, "tokenizer_config.json")
+            # Try to find tokenizer file
+            raise RuntimeError(f"tokenizer.json not found at {tokenizer_path}")
         self.tokenizer = tokenizers.Tokenizer.from_file(tokenizer_path)
 
         # Load model weights manually using torch
