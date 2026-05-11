@@ -17,7 +17,7 @@ export const useKbStore = defineStore("kb", () => {
   }
 
   async function addFolder(folderPath) {
-    const resp = await api.post("/api/kb/folder", null, {
+    const resp = await api.get("/api/kb/folder", {
       params: { folder_path: folderPath }
     })
     await fetchDocuments()
@@ -29,5 +29,12 @@ export const useKbStore = defineStore("kb", () => {
     await fetchDocuments()
   }
 
-  return { documents, loading, fetchDocuments, addFolder, deleteDocument }
+  async function uploadDocument(formData) {
+    await api.post("/api/kb/documents", formData, {
+      headers: { "Content-Type": "multipart/form-data" }
+    })
+    await fetchDocuments()
+  }
+
+  return { documents, loading, fetchDocuments, addFolder, uploadDocument, deleteDocument }
 })

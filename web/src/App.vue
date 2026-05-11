@@ -2,6 +2,9 @@
   <router-view />
 </template>
 
-<script setup>
-// 根组件
-</script>
+<style>
+/* 全局 Viewport */
+#app {
+  min-height: 100vh;
+}
+</style>

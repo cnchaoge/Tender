@@ -1,43 +1,82 @@
 <template>
-  <div class="login-page">
-    <div class="login-card">
-      <h1 class="title">ClawOS X</h1>
-      <p class="subtitle">制造业 AI 文档助手</p>
+  <div class="login-layout">
 
-      <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
-        <el-form-item prop="username">
-          <el-input
-            v-model="form.username"
-            placeholder="用户名"
-            prefix-icon="User"
-            size="large"
-          />
-        </el-form-item>
-        <el-form-item prop="password">
-          <el-input
-            v-model="form.password"
-            type="password"
-            placeholder="密码"
-            prefix-icon="Lock"
-            size="large"
-            @keyup.enter="handleLogin"
-          />
-        </el-form-item>
-        <el-form-item>
+    <!-- Left Hero Panel -->
+    <div class="hero-panel">
+      <div class="hero-inner">
+        <div class="hero-brand">
+          <span class="brand-icon">⚡</span>
+          <span class="brand-name">ClawOS X</span>
+        </div>
+        <h1 class="hero-headline">制造业投标标书<br>AI 一键生成</h1>
+        <p class="hero-sub">上传产品资料 / 选择标书模板 / 生成专业投标文件</p>
+
+        <div class="hero-features">
+          <div class="feature-item">
+            <span class="feature-check">✓</span>
+            <span>数据本地存储，文件不离开工厂</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-check">✓</span>
+            <span>开箱即用，无需复杂配置</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-check">✓</span>
+            <span>行业垂直，专为制造业定制</span>
+          </div>
+        </div>
+
+        <div class="hero-footer">
+          已有 <strong>127</strong> 家工厂正在使用
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Login Panel -->
+    <div class="login-panel">
+      <div class="login-card">
+        <div class="login-brand-mobile">
+          <span class="brand-icon">⚡</span>
+          <span class="brand-name">ClawOS</span>
+        </div>
+        <p class="login-title">登录系统</p>
+        <p class="login-hint">输入账号密码进入控制台</p>
+
+        <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
+          <el-form-item prop="username">
+            <el-input
+              v-model="form.username"
+              placeholder="用户名"
+              size="large"
+              :prefix-icon="User"
+            />
+          </el-form-item>
+          <el-form-item prop="password">
+            <el-input
+              v-model="form.password"
+              type="password"
+              placeholder="密码"
+              size="large"
+              :prefix-icon="Lock"
+              show-password
+              @keyup.enter="handleLogin"
+            />
+          </el-form-item>
           <el-button
             type="primary"
             size="large"
-            style="width: 100%"
+            class="login-btn"
             :loading="loading"
             @click="handleLogin"
           >
             登录
           </el-button>
-        </el-form-item>
-      </el-form>
+        </el-form>
 
-      <div class="tips">默认账号：admin / admin123</div>
+        <div class="login-tips">默认账号：admin / admin123</div>
+      </div>
     </div>
+
   </div>
 </template>
 
@@ -45,6 +84,7 @@
 import { ref, reactive } from "vue"
 import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
+import { User, Lock } from "@element-plus/icons-vue"
 import { useAuthStore } from "../stores/auth"
 
 const router = useRouter()
@@ -61,7 +101,6 @@ const rules = {
 async function handleLogin() {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
-
   loading.value = true
   try {
     await authStore.login(form.username, form.password)
@@ -75,41 +114,179 @@ async function handleLogin() {
 </script>
 
 <style scoped>
-.login-page {
-  height: 100vh;
+/* ── Two-column layout ── */
+.login-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+/* ── Hero Panel ── */
+.hero-panel {
+  background: var(--color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  padding: 48px;
+}
+
+.hero-inner {
+  max-width: 400px;
+}
+
+.hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+.brand-icon {
+  font-size: 28px;
+}
+.brand-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.5px;
+}
+
+.hero-headline {
+  font-size: 36px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+  letter-spacing: -1px;
+  margin-bottom: 16px;
+}
+
+.hero-sub {
+  font-size: 15px;
+  color: rgba(255,255,255,0.75);
+  line-height: 1.6;
+  margin-bottom: 36px;
+}
+
+.hero-features {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 40px;
+}
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: rgba(255,255,255,0.9);
+}
+.feature-check {
+  color: #86EFAC;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.hero-footer {
+  font-size: 13px;
+  color: rgba(255,255,255,0.6);
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,0.2);
+}
+.hero-footer strong {
+  color: #fff;
+}
+
+/* ── Login Panel ── */
+.login-panel {
+  background: var(--color-canvas);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
 }
 
 .login-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 40px;
-  width: 380px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.title {
-  text-align: center;
-  font-size: 28px;
-  font-weight: bold;
-  color: #1a1a2e;
-  margin-bottom: 4px;
+.login-brand-mobile {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.subtitle {
-  text-align: center;
-  color: #909399;
-  margin-bottom: 32px;
-  font-size: 14px;
+.login-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--color-ink);
+  letter-spacing: -0.4px;
+  margin-bottom: 0;
 }
 
-.tips {
-  text-align: center;
-  color: #c0c4cc;
-  font-size: 12px;
+.login-hint {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  margin-top: -8px;
+}
+
+.login-btn {
+  width: 100%;
+  height: 44px;
+  font-size: 15px !important;
+  font-weight: 500 !important;
   margin-top: 8px;
+}
+
+.login-tips {
+  text-align: center;
+  color: var(--color-ink-tertiary);
+  font-size: 12px;
+  margin-top: -4px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .login-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .hero-panel {
+    padding: 36px 24px 28px;
+  }
+
+  .hero-inner {
+    max-width: 100%;
+  }
+
+  .hero-brand {
+    margin-bottom: 24px;
+  }
+
+  .hero-headline {
+    font-size: 26px;
+    margin-bottom: 12px;
+  }
+
+  .hero-features {
+    margin-bottom: 24px;
+  }
+
+  .hero-footer {
+    display: none;
+  }
+
+  .login-panel {
+    padding: 32px 24px;
+    align-items: flex-start;
+  }
+
+  .login-brand-mobile {
+    display: flex;
+  }
 }
 </style>

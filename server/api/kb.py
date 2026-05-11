@@ -31,7 +31,7 @@ def list_documents():
     return [Document(**dict(r)) for r in rows]
 
 
-@router.post("/folder", response_model=list[Document])
+@router.get("/folder", response_model=list[Document])
 async def add_folder(folder_path: str):
     """扫描指定文件夹，将所有支持的文件加入知识库"""
     folder = Path(folder_path)
@@ -50,18 +50,18 @@ async def add_folder(folder_path: str):
     if not files:
         raise HTTPException(status_code=400, detail="文件夹中没有找到支持的文档（.pdf/.docx/.xlsx/.md/.txt）")
 
-    # 查询已有文件（去重：同名 + 同大小 = 同一文件）
+    # 查询已有文件（去重：同名已存在则跳过）
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT file_path, file_size FROM documents")
-    existing = {(row["file_path"], row["file_size"]) for row in cur.fetchall()}
+    cur.execute("SELECT filename FROM documents")
+    existing_filenames = {row["filename"] for row in cur.fetchall()}
     conn.close()
 
     results = []
     skipped = 0
     for file_path in files:
-        key = (str(file_path), file_path.stat().st_size)
-        if key in existing:
+        # 同名文件已存在则跳过（与单文件上传保持一致）
+        if file_path.name in existing_filenames:
             skipped += 1
             continue
 
@@ -112,7 +112,64 @@ async def add_folder(folder_path: str):
     return results
 
 
-@router.delete("/documents/{doc_id}", response_model=Resp)
+@router.post("/documents")
+async def upload_document(file: UploadFile = File(...)):
+    """上传单个文件到知识库"""
+    import aiofiles
+
+    # 保存文件
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in [".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt"]:
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {suffix}")
+
+    # 去重：同名文件已存在则直接返回
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, file_path FROM documents WHERE filename = ?", (file.filename,))
+    existing = cur.fetchone()
+    if existing:
+        conn.close()
+        return {"file_path": existing["file_path"], "doc_id": existing["id"], "chunk_count": 0, "duplicate": True}
+
+    saved_path = UPLOADS_DIR / f"{uuid.uuid4().hex}{suffix}"
+    async with aiofiles.open(saved_path, "wb") as f:
+        content = await file.read()
+        await f.write(content)
+
+    # 解析
+    text, _ = parse_file(str(saved_path))
+    chunks = chunk_text(text)
+
+    # 存入 SQLite
+    cur.execute(
+        "INSERT INTO documents (filename, file_type, file_path, file_size, status, chunk_count) VALUES (?, ?, ?, ?, ?, ?)",
+        (file.filename, suffix.lstrip("."), str(saved_path), len(content), "ready", len(chunks))
+    )
+    doc_id = cur.lastrowid
+
+    chunk_records = []
+    for i, chunk_text_content in enumerate(chunks):
+        cur.execute(
+            "INSERT INTO chunks (doc_id, chunk_index, text, metadata) VALUES (?, ?, ?, ?)",
+            (doc_id, i, chunk_text_content, "{}")
+        )
+        chunk_records.append({"text": chunk_text_content, "chunk_index": i, "metadata": {}})
+
+    # Embed 并加入向量库
+    embedder = get_embedder()
+    texts = [r["text"] for r in chunk_records]
+    vectors = embedder.embed(texts)
+    for r, v in zip(chunk_records, vectors):
+        r["vector"] = v
+
+    add_chunks(doc_id, chunk_records)
+    conn.commit()
+    conn.close()
+
+    return {"file_path": str(saved_path), "doc_id": doc_id, "chunk_count": len(chunks)}
+
+
+@router.delete("/documents/{doc_id}")
 def delete_document(doc_id: int):
     conn = get_db()
     cur = conn.cursor()

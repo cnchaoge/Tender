@@ -47,19 +47,15 @@ class Settings(BaseSettings):
     DEEPSEEK_MODEL: str = "deepseek-chat"
 
     # Embedding
-    EMBED_PROVIDER: str = "dashscope"  # dashscope | bge
+    EMBED_PROVIDER: str = "mock"  # dashscope | bge | m3e | mock
     DASHSCOPE_EMBED_MODEL: str = "text-embedding-v3"
     BGE_MODEL_PATH: str = ""
+    M3E_MODEL_PATH: str = "moka-ai/m3e-base"
 
-    # 向量数据库
+    # ChromaDB
     CHROMA_PERSIST_DIR: str = str(DATA_DIR / "chromadb")
 
-    # 飞书
-    FEISHU_APP_ID: str = ""
-    FEISHU_APP_SECRET: str = ""
-    FEISHU_BOT_TOKEN: str = ""
-
-    # 文件大小限制（MB）
+    # File size limit (MB)
     MAX_FILE_SIZE: int = 50
 
     class Config:

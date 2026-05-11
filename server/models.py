@@ -69,13 +69,32 @@ class BidParseReq(BaseModel):
     file_path: str  # 已在服务端的文件路径
 
 
+class ScoringItem(BaseModel):
+    name: str
+    score: float
+    max_score: float
+    type: str = "expert"   # expert=专家打分, formula=公式计算, qualified=满足即得分
+    formula: str = ""       # type=formula 时填写计算公式
+    bidirectional: bool = False  # True=偏离扣分, False=正向得分
+    disqualify_if_fail: bool = False  # 不满足即废标
+    requirements: List[str] = []  # 补充说明，如 ["评委逐项打分", "保留一位小数"]
+
+
+class ScoringSection(BaseModel):
+    name: str             # 如"技术标"、"商务标"
+    weight: float         # 占比，如 60（表示60%）
+    items: List[ScoringItem] = []
+
+
 class BidParseResp(BaseModel):
     project_name: str
     deadline: str
     requirements: List[str]
     qualification: List[str]
-    scoring: List[dict]
+    scoring: dict = {}    # {method, total_score, sections, disqualify_conditions, price_method}
     raw_text: str
+    recommended_materials: List[dict] = []
+    parse_meta: dict = {}  # {confidence: float, warnings: List[str]}
 
 
 class BidGenerateReq(BaseModel):
@@ -83,14 +102,15 @@ class BidGenerateReq(BaseModel):
     materials: List[int]  # 素材文档 ID 列表
 
 
-# ============ 飞书 ============
-class FeishuMessage(BaseModel):
-    msg_type: str
-    content: dict
-    sender: dict
+class BidMatchCheckReq(BaseModel):
+    parse_result: dict  # BidParseResp 结果
+    materials: List[int]  # 待检测的素材文档 ID 列表
 
 
-class FeishuConfig(BaseModel):
-    app_id: str
-    app_name: str
-    status: str  # not_configured | connected | error
+# ============ 标书质检 ============
+class BidReviewResult(BaseModel):
+    passed: bool                    # 是否通过
+    score: float                    # 质量评分 0-100
+    issues: List[str]              # 发现的问题列表
+    suggestions: List[str]          # 修改建议
+    coverage_check: dict            # 资质要求覆盖情况

@@ -1,17 +1,297 @@
-/* ClawOS X 全局样式 */
+/* ClawOS X — Linear Light Theme (方案1) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Linear Color Tokens — Light */
+  --color-primary: #3B82F6;
+  --color-primary-hover: #60A5FA;
+  --color-primary-focus: #2563EB;
+  --color-on-primary: #ffffff;
+
+  --color-ink: #1F2937;
+  --color-ink-muted: #6B7280;
+  --color-ink-subtle: #9CA3AF;
+  --color-ink-tertiary: #D1D5DB;
+
+  /* 方案1：浅色 Linear 风格 */
+  --color-canvas: #FAFAFA;
+  --color-surface-1: #FFFFFF;
+  --color-surface-2: #F5F5F5;
+  --color-surface-3: #EFEFEF;
+  --color-surface-4: #E5E5E5;
+
+  --color-hairline: #E5E5E5;
+  --color-hairline-strong: #D1D5DB;
+  --color-hairline-tertiary: #E5E5E5;
+
+  --color-inverse-canvas: #1E1E1E;
+  --color-inverse-surface-1: #252526;
+  --color-inverse-ink: #f7f8f8;
+
+  --color-brand-secure: #3B82F6;
+  --color-semantic-success: #10B981;
+  --color-semantic-warning: #F59E0B;
+  --color-semantic-error: #EF4444;
+
+  /* Linear Spacing */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+
+  /* Border Radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+}
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-body {
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #f5f7fa;
-  color: #303133;
+html, body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.01px;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
 }
 
 a {
   text-decoration: none;
-  color: inherit;
+  color: var(--color-primary);
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface-1);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-hairline-strong);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-tertiary);
+}
+
+/* ─── Linear Surface Card ─── */
+.linear-card {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+}
+
+/* ─── Element Plus Dark Overrides ─── */
+.el-card {
+  background: var(--color-surface-1) !important;
+  border: 1px solid var(--color-hairline) !important;
+  border-radius: var(--radius-lg) !important;
+  color: var(--color-ink) !important;
+  --el-card-bg-color: var(--color-surface-1);
+  --el-border-color: var(--color-hairline);
+  --el-text-color-primary: var(--color-ink);
+  --el-text-color-regular: var(--color-ink-muted);
+}
+
+.el-card__header {
+  border-bottom: 1px solid var(--color-hairline) !important;
+  color: var(--color-ink) !important;
+  font-weight: 500;
+  font-size: 14px;
+  padding: var(--space-sm) var(--space-lg) !important;
+}
+
+.el-card__body {
+  padding: var(--space-lg) !important;
+}
+
+.el-button {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  border-radius: var(--radius-md) !important;
+  font-size: 13px;
+  letter-spacing: 0;
+  transition: all 0.15s ease;
+}
+
+.el-button--primary {
+  background: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+  color: var(--color-on-primary) !important;
+}
+.el-button--primary:hover {
+  background: var(--color-primary-hover) !important;
+  border-color: var(--color-primary-hover) !important;
+}
+.el-button--primary:active {
+  background: var(--color-primary-focus) !important;
+  border-color: var(--color-primary-focus) !important;
+}
+
+.el-button--default {
+  background: var(--color-surface-2) !important;
+  border-color: var(--color-hairline-strong) !important;
+  color: var(--color-ink-muted) !important;
+}
+.el-button--default:hover {
+  background: var(--color-surface-3) !important;
+  color: var(--color-ink) !important;
+}
+
+.el-upload {
+  display: block !important;
+}
+
+.el-progress-bar__outer {
+  background: var(--color-surface-2) !important;
+}
+
+.el-tag {
+  border-radius: var(--radius-sm) !important;
+  font-size: 12px;
+  border: 1px solid var(--color-hairline-strong) !important;
+  background: var(--color-surface-2) !important;
+  color: var(--color-ink-muted) !important;
+}
+
+.el-tag .el-tag__close {
+  color: var(--color-ink-subtle) !important;
+}
+.el-tag .el-tag__close:hover {
+  background: var(--color-hairline-strong) !important;
+  color: var(--color-ink) !important;
+}
+
+.el-divider {
+  border-color: var(--color-hairline) !important;
+}
+
+.el-descriptions__label {
+  color: var(--color-ink-subtle) !important;
+  background: var(--color-surface-2) !important;
+  font-size: 12px !important;
+  border-radius: var(--radius-xs) !important;
+}
+
+.el-descriptions__content {
+  color: var(--color-ink) !important;
+  background: var(--color-surface-1) !important;
+  font-size: 13px !important;
+}
+
+.el-descriptions .el-descriptions__cell {
+  padding: 6px 10px !important;
+}
+
+.el-collapse {
+  border: 1px solid var(--color-hairline) !important;
+  border-radius: var(--radius-md) !important;
+  background: var(--color-surface-1) !important;
+}
+
+.el-collapse-item__header {
+  background: var(--color-surface-2) !important;
+  color: var(--color-ink-subtle) !important;
+  font-size: 12px !important;
+  border-radius: var(--radius-md) !important;
+  padding: 8px 12px !important;
+  height: auto !important;
+  line-height: 1.4 !important;
+}
+
+.el-collapse-item__content {
+  background: var(--color-surface-1) !important;
+  color: var(--color-ink-subtle) !important;
+  font-size: 12px !important;
+  padding: 12px !important;
+}
+
+.el-checkbox {
+  color: var(--color-ink-muted) !important;
+}
+.el-checkbox__input.is-checked .el-checkbox__inner {
+  background: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+}
+.el-checkbox__label {
+  color: var(--color-ink-muted) !important;
+  font-size: 13px !important;
+}
+
+.el-input__wrapper {
+  background: var(--color-surface-2) !important;
+  border: 1px solid var(--color-hairline-strong) !important;
+  box-shadow: none !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--color-ink) !important;
+}
+.el-input__inner {
+  color: var(--color-ink) !important;
+}
+.el-input__inner::placeholder {
+  color: var(--color-ink-tertiary) !important;
+}
+.el-input__wrapper:hover {
+  border-color: var(--color-hairline-tertiary) !important;
+}
+.el-input__wrapper.is-focus {
+  border-color: var(--color-primary-focus) !important;
+  box-shadow: 0 0 0 2px rgba(94, 105, 209, 0.3) !important;
+}
+
+.el-alert {
+  border-radius: var(--radius-md) !important;
+  border: 1px solid !important;
+}
+.el-alert--success {
+  background: rgba(39, 166, 68, 0.08) !important;
+  border-color: rgba(39, 166, 68, 0.3) !important;
+  color: #56d364 !important;
+}
+.el-alert--warning {
+  background: rgba(230, 162, 60, 0.08) !important;
+  border-color: rgba(230, 162, 60, 0.3) !important;
+  color: #e6a23c !important;
+}
+.el-alert--error {
+  background: rgba(245, 108, 108, 0.08) !important;
+  border-color: rgba(245, 108, 108, 0.3) !important;
+  color: #f56c6c !important;
+}
+.el-alert__title {
+  color: inherit !important;
+  font-size: 13px !important;
+}
+
+.el-space {
+  gap: 8px !important;
+}
+
+/* ─── Linear accent clickable underline ─── */
+.clickable-underline {
+  cursor: pointer;
+  text-decoration: underline dashed var(--color-primary);
+  text-underline-offset: 3px;
+}
+.clickable-underline:hover {
+  color: var(--color-primary);
 }

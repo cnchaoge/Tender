@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import threading
 
 from server.db.sqlite import init_db
-from server.api import auth, kb, rag, bid, feishu, admin, relay
+from server.api import auth, kb, rag, bid, admin
 
 
 @asynccontextmanager
@@ -47,9 +47,7 @@ app.include_router(auth.router)
 app.include_router(kb.router)
 app.include_router(rag.router)
 app.include_router(bid.router)
-app.include_router(feishu.router)
 app.include_router(admin.router)
-app.include_router(relay.router)
 
 # 静态文件（前端dist）
 WEB_DIST = _get_resource_path("web/dist")

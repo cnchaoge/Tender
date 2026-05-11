@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClawOS X — 制造业投标标书 AI 助手</title>
+  <meta name="description" content="制造业投标标书 AI 一键生成，本地部署，数据不出厂。专为管道管件、体育器材、机床附件等中小企业设计。">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --primary: #3B82F6;
+      --primary-dark: #2563EB;
+      --primary-light: #EFF6FF;
+      --ink: #1F2937;
+      --ink-muted: #6B7280;
+      --ink-subtle: #9CA3AF;
+      --canvas: #FAFAFA;
+      --surface: #FFFFFF;
+      --border: #E5E7EB;
+      --success: #10B981;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--canvas);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { text-decoration: none; color: inherit; }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      background: rgba(250,250,250,0.9);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      z-index: 100;
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+    }
+    .nav-brand span { font-size: 22px; }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    .nav-links a {
+      font-size: 14px;
+      color: var(--ink-muted);
+      transition: color 0.15s;
+    }
+    .nav-links a:hover { color: var(--ink); }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--primary);
+      color: #fff !important;
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: var(--primary-dark); }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 80px 0 72px;
+      text-align: center;
+      background: linear-gradient(180deg, var(--primary-light) 0%, var(--canvas) 100%);
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-muted);
+      margin-bottom: 28px;
+    }
+    .hero-badge-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    .hero h1 {
+      font-size: 52px;
+      font-weight: 700;
+      letter-spacing: -1.5px;
+      line-height: 1.1;
+      color: var(--ink);
+      margin-bottom: 20px;
+    }
+    .hero h1 .blue { color: var(--primary); }
+    .hero-sub {
+      font-size: 18px;
+      color: var(--ink-muted);
+      margin-bottom: 36px;
+      max-width: 520px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .btn-hero-primary {
+      background: var(--primary);
+      color: #fff;
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      transition: background 0.15s, transform 0.15s;
+    }
+    .btn-hero-primary:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+    .btn-hero-ghost {
+      background: #fff;
+      color: var(--ink);
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      transition: all 0.15s;
+    }
+    .btn-hero-ghost:hover {
+      border-color: var(--ink-subtle);
+      transform: translateY(-1px);
+    }
+
+    /* ── Stats Bar ── */
+    .stats-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 48px;
+      padding: 24px 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: #fff;
+      margin-bottom: 80px;
+    }
+    .stat-item { text-align: center; }
+    .stat-num {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.6px;
+      color: var(--ink);
+    }
+    .stat-lbl {
+      font-size: 13px;
+      color: var(--ink-subtle);
+      margin-top: 2px;
+    }
+    .stat-divider {
+      width: 1px;
+      height: 32px;
+      background: var(--border);
+    }
+
+    /* ── Section Common ── */
+    .section {
+      padding: 64px 0;
+    }
+    .section-eyebrow {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--primary);
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.8px;
+      text-align: center;
+      color: var(--ink);
+      margin-bottom: 12px;
+    }
+    .section-desc {
+      font-size: 16px;
+      color: var(--ink-muted);
+      text-align: center;
+      max-width: 480px;
+      margin: 0 auto 48px;
+    }
+
+    /* ── Pain Points ── */
+    .pain-section { background: #fff; margin: 0 -24px; padding: 64px 24px; }
+    .pain-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .pain-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: 28px 24px;
+      text-align: center;
+    }
+    .pain-icon { font-size: 36px; margin-bottom: 14px; }
+    .pain-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 8px;
+    }
+    .pain-desc { font-size: 13px; color: var(--ink-muted); line-height: 1.5; }
+
+    /* ── Features ── */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .feature-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: 28px;
+      transition: all 0.2s;
+    }
+    .feature-card:hover {
+      border-color: var(--primary);
+      box-shadow: 0 4px 20px rgba(59,130,246,0.1);
+    }
+    .feature-icon {
+      width: 48px; height: 48px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      margin-bottom: 16px;
+    }
+    .fi-blue { background: var(--primary-light); }
+    .fi-green { background: #D1FAE5; }
+    .fi-orange { background: #FEF3C7; }
+    .feature-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 8px;
+    }
+    .feature-desc {
+      font-size: 13px;
+      color: var(--ink-muted);
+      line-height: 1.6;
+    }
+
+    /* ── Why Local ── */
+    .why-section {
+      background: var(--primary);
+      margin: 0 -24px;
+      padding: 64px 24px;
+    }
+    .why-section .section-title { color: #fff; }
+    .why-section .section-desc { color: rgba(255,255,255,0.7); }
+    .why-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .why-card {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: var(--radius-xl);
+      padding: 24px;
+      text-align: center;
+    }
+    .why-icon { font-size: 32px; margin-bottom: 12px; }
+    .why-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    .why-desc {
+      font-size: 13px;
+      color: rgba(255,255,255,0.7);
+      line-height: 1.5;
+    }
+
+    /* ── Industries ── */
+    .industry-list {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .industry-tag {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 8px 18px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink);
+      transition: all 0.15s;
+    }
+    .industry-tag:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    /* ── CTA ── */
+    .cta-section {
+      text-align: center;
+      padding: 80px 0;
+      background: linear-gradient(180deg, var(--canvas) 0%, var(--primary-light) 100%);
+    }
+    .cta-title {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -0.8px;
+      color: var(--ink);
+      margin-bottom: 14px;
+    }
+    .cta-desc {
+      font-size: 16px;
+      color: var(--ink-muted);
+      margin-bottom: 32px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      background: var(--ink);
+      color: rgba(255,255,255,0.6);
+      padding: 36px 24px;
+      text-align: center;
+    }
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 14px;
+    }
+    .footer-brand span { font-size: 20px; }
+    .footer-links {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+    .footer-links a {
+      font-size: 13px;
+      color: rgba(255,255,255,0.5);
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: #fff; }
+    .footer-copy { font-size: 12px; }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 36px; }
+      .hero-sub { font-size: 16px; }
+      .pain-grid, .feature-grid, .why-grid { grid-template-columns: 1fr; }
+      .stats-bar { gap: 24px; flex-wrap: wrap; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-brand">
+      <span>⚡</span> ClawOS X
+    </div>
+    <div class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#why">为什么选我们</a>
+      <a href="#industries">适用行业</a>
+      <a href="https://github.com/cnchaoge/clawosx" target="_blank">GitHub</a>
+    </div>
+    <a href="http://clawosx.net" class="btn-primary" target="_blank">立即试用 →</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge">
+      <div class="hero-badge-dot"></div>
+      本地部署 · 数据不出厂
+    </div>
+    <h1>
+      制造业投标标书<br>
+      <span class="blue">AI 一键生成</span>
+    </h1>
+    <p class="hero-sub">
+      上传产品资料 · 选择标书模板 · 生成专业投标文件<br>
+      数据存储在工厂自有电脑，文件永不离开
+    </p>
+    <div class="hero-actions">
+      <a href="http://clawosx.net" class="btn-hero-primary" target="_blank">免费试用</a>
+      <a href="#features" class="btn-hero-ghost">了解更多</a>
+    </div>
+  </div>
+</section>
+
+<!-- Stats -->
+<div class="stats-bar">
+  <div class="stat-item">
+    <div class="stat-num">127+</div>
+    <div class="stat-lbl">工厂正在使用</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat-item">
+    <div class="stat-num">3 分钟</div>
+    <div class="stat-lbl">完成标书初稿</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat-item">
+    <div class="stat-num">100%</div>
+    <div class="stat-lbl">数据本地存储</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat-item">
+    <div class="stat-num">零</div>
+    <div class="stat-lbl">运维成本</div>
+  </div>
+</div>
+
+<!-- Pain Points -->
+<div class="pain-section">
+  <div class="container">
+    <div class="section-eyebrow">痛点</div>
+    <div class="section-title">投标标书，难题重重</div>
+    <div class="section-desc">制造业中小企业投标时面临的真实挑战</div>
+    <div class="pain-grid">
+      <div class="pain-card">
+        <div class="pain-icon">⏰</div>
+        <div class="pain-title">时间紧</div>
+        <div class="pain-desc">标书编写耗时长，反复修改易出错，投标窗口期短，来不及准备</div>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon">📝</div>
+        <div class="pain-title">经验少</div>
+        <div class="pain-desc">缺乏专业文档人员，模板难找，格式不规范，内容不专业</div>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon">🔒</div>
+        <div class="pain-title">数据安全</div>
+        <div class="pain-desc">工厂资料涉及商业机密，不想上传到外部服务器，风险不可控</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Features -->
+<section class="section" id="features">
+  <div class="container">
+    <div class="section-eyebrow">核心功能</div>
+    <div class="section-title">标书生成三步走</div>
+    <div class="section-desc">从文档上传到标书生成，全流程 AI 自动化</div>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon fi-blue">📄</div>
+        <div class="feature-title">知识库管理</div>
+        <div class="feature-desc">上传产品资料（PDF/Word/Excel），AI 自动解析理解内容，构建专属知识库</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-green">💬</div>
+        <div class="feature-title">RAG 智能问答</div>
+        <div class="feature-desc">基于文档内容的精准问答检索，快速找到所需技术参数和业绩案例</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-orange">📋</div>
+        <div class="feature-title">投标标书生成</div>
+        <div class="feature-desc">选择标书模板 + 补充关键信息 = AI 自动生成专业投标文件</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Why Local -->
+<section class="why-section" id="why">
+  <div class="container">
+    <div class="section-eyebrow" style="color:rgba(255,255,255,0.7)">安全</div>
+    <div class="section-title">为什么选择本地部署</div>
+    <div class="section-desc">数据存储在工厂自有设备，文件永不离开</div>
+    <div class="why-grid">
+      <div class="why-card">
+        <div class="why-icon">🖥️</div>
+        <div class="why-title">硬件预装，开箱即用</div>
+        <div class="why-desc">我们提供预装软件的小型主机，接电联网即可使用，无需安装配置，工厂零技术门槛</div>
+      </div>
+      <div class="why-card">
+        <div class="why-icon">🔒</div>
+        <div class="why-title">数据不出厂</div>
+        <div class="why-desc">所有文档存储在工厂自有设备，不上传任何文件到第三方云平台，文件完全自主可控</div>
+      </div>
+      <div class="why-card">
+        <div class="why-icon">🏭</div>
+        <div class="why-title">行业垂直定制</div>
+        <div class="why-desc">专为制造业中小企业定制，理解管道管件、体育器材等行业术语和投标规范</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Industries -->
+<section class="section" id="industries">
+  <div class="container">
+    <div class="section-eyebrow">适用行业</div>
+    <div class="section-title">这些工厂已经在用</div>
+    <div class="section-desc">专注制造业细分领域，懂行业才能做专业</div>
+    <div class="industry-list">
+      <div class="industry-tag">管道管件</div>
+      <div class="industry-tag">体育器材</div>
+      <div class="industry-tag">机床附件</div>
+      <div class="industry-tag">五金配件</div>
+      <div class="industry-tag">模具制造</div>
+      <div class="industry-tag">金属加工</div>
+      <div class="industry-tag">电气设备</div>
+      <div class="industry-tag">汽车零部件</div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="container">
+    <div class="cta-title">让投标更简单</div>
+    <div class="cta-desc">上传资料，3分钟生成专业标书，数据完全自主可控</div>
+    <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
+      <a href="http://clawosx.net" class="btn-hero-primary" target="_blank">立即免费试用 →</a>
+      <a href="https://github.com/cnchaoge/clawosx" class="btn-hero-ghost" target="_blank">查看 GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <div class="footer-brand">
+      <span>⚡</span> ClawOS X
+    </div>
+    <div class="footer-links">
+      <a href="#features">功能</a>
+      <a href="#why">为什么选我们</a>
+      <a href="#industries">适用行业</a>
+      <a href="https://github.com/cnchaoge/clawosx" target="_blank">GitHub</a>
+    </div>
+    <div class="footer-copy">© 2026 ClawOS X. 本地部署，数据不出厂。</div>
+  </div>
+</footer>
+
+</body>
+</html>

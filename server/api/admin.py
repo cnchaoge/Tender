@@ -3,11 +3,21 @@ ClawOS X - 管理后台 API（统一配置 + 用户管理）
 """
 import os
 import signal
+import sys
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from server.db.sqlite import get_db
 from server.config import get_settings, update_env
+
+# ============ 热重启信号处理 ============
+def _hot_restart(signum, frame):
+    """收到 SIGTERM 后用 os.execl 原地替换进程，实现零停机重启"""
+    python = sys.executable
+    os.execl(python, python, "-m", "uvicorn", "server.main:app",
+             "--host", "0.0.0.0", "--port", "8000")
+
+signal.signal(signal.SIGTERM, _hot_restart)
 from server.models import Resp
 
 router = APIRouter(prefix="/api/admin", tags=["管理后台"])
@@ -21,6 +31,7 @@ class ModelConfigReq(BaseModel):
     provider: str = "dashscope"  # dashscope | deepseek
     api_key: str
     model: str = ""
+    embed_provider: str = ""  # dashscope | bge | m3e | mock
 
 
 class ModelConfigResp(BaseModel):
@@ -28,25 +39,13 @@ class ModelConfigResp(BaseModel):
     message: str
 
 
-class FeishuConfigReq(BaseModel):
-    app_id: str
-    app_secret: str
-
-
-class FeishuConfigResp(BaseModel):
-    valid: bool
-    message: str
-
-
 class SystemConfig(BaseModel):
-    """系统配置（不含敏感信息）"""
+    """System config (no sensitive info)"""
     llm_provider: str
     dashscope_model: str
     deepseek_model: str
-    dashscope_api_key_set: bool  # 是否已配置（不返回实际 key）
-    feishu_app_id: str
-    feishu_app_secret_set: bool  # 是否已配置
-    feishu_status: str  # not_configured | connected | error
+    embed_provider: str
+    dashscope_api_key_set: bool  # whether configured (no actual key)
 
 
 # ============ 用户管理 ============
@@ -126,7 +125,7 @@ def get_stats():
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT COUNT(*) as cnt FROM documents")
+    cur.execute("SELECT COUNT(*) as cnt FROM (SELECT 1 FROM documents GROUP BY filename)")
     doc_count = cur.fetchone()["cnt"]
 
     cur.execute("SELECT COUNT(*) as cnt FROM chunks")
@@ -148,16 +147,14 @@ def get_stats():
 
 @router.get("/config", response_model=SystemConfig)
 def get_config():
-    """获取当前系统配置（含是否已配置的标识）"""
+    """Get current system config (with configuration flags)"""
     s = get_settings()
     return SystemConfig(
         llm_provider=s.LLM_PROVIDER,
         dashscope_model=s.DASHSCOPE_MODEL,
         deepseek_model=s.DEEPSEEK_MODEL,
+        embed_provider=s.EMBED_PROVIDER,
         dashscope_api_key_set=bool(s.DASHSCOPE_API_KEY),
-        feishu_app_id=s.FEISHU_APP_ID,
-        feishu_app_secret_set=bool(s.FEISHU_APP_SECRET),
-        feishu_status="connected" if s.FEISHU_APP_ID and s.FEISHU_APP_SECRET else "not_configured",
     )
 
 
@@ -212,46 +209,16 @@ def save_model_config(body: ModelConfigReq):
         update_env("LLM_PROVIDER", "dashscope")
         update_env("DASHSCOPE_API_KEY", body.api_key)
         update_env("DASHSCOPE_MODEL", body.model or "qwen-turbo")
+    if body.embed_provider:
+        update_env("EMBED_PROVIDER", body.embed_provider)
     return Resp(message="配置已保存，需重启服务生效")
-
-
-# ============ 飞书配置 ============
-
-@router.post("/feishu/verify", response_model=FeishuConfigResp)
-def verify_feishu_config(body: FeishuConfigReq):
-    """验证飞书配置是否有效"""
-    if not body.app_id or not body.app_secret:
-        return FeishuConfigResp(valid=False, message="App ID 和 App Secret 不能为空")
-
-    import httpx
-    try:
-        resp = httpx.post(
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            json={"app_id": body.app_id, "app_secret": body.app_secret},
-            timeout=10
-        )
-        data = resp.json()
-        if data.get("code") == 0:
-            return FeishuConfigResp(valid=True, message="连接成功")
-        else:
-            return FeishuConfigResp(valid=False, message=f"验证失败: {data.get('msg', data)}")
-    except Exception as e:
-        return FeishuConfigResp(valid=False, message=f"连接异常: {str(e)}")
-
-
-@router.post("/feishu/config", response_model=Resp)
-def save_feishu_config(body: FeishuConfigReq):
-    """保存飞书配置到 .env"""
-    update_env("FEISHU_APP_ID", body.app_id)
-    update_env("FEISHU_APP_SECRET", body.app_secret)
-    return Resp(message="飞书配置已保存，需重启服务生效")
 
 
 # ============ 服务重启 ============
 
 @router.post("/restart", response_model=Resp)
 def restart_server():
-    """重启后端服务（开发模式）"""
+    """重启后端服务（热重启，不中断）"""
     pid = os.getpid()
     os.kill(pid, signal.SIGTERM)
     return Resp(message="服务重启中")
