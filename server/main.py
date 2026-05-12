@@ -4,6 +4,11 @@ ClawOS X - FastAPI 入口
 import sys, os, time
 from pathlib import Path
 
+# 确保项目根目录在 Python 路径中（支持从 server/ 目录运行）
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
 # PyInstaller 打包后切到 exe 所在目录，确保 .env 和 data 路径正确
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     os.chdir(Path(sys.executable).parent)
