@@ -72,6 +72,19 @@ def health():
     return {"status": "ok"}
 
 
+# SPA fallback: 所有非 API 路由都返回 index.html（支持 Vue Router history 模式）
+@app.get("/{path:path}")
+async def spa_fallback(path: str):
+    if WEB_DIST.exists():
+        # 静态资源直接返回
+        asset_path = WEB_DIST / path
+        if asset_path.exists() and asset_path.is_file():
+            return FileResponse(str(asset_path))
+        # 前端路由返回 index.html
+        return FileResponse(str(WEB_DIST / "index.html"))
+    return {"error": "not found"}
+
+
 # ---------------------------------------------------------------------------
 # uvicorn 服务线程管理
 # ---------------------------------------------------------------------------
