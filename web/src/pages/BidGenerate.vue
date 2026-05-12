@@ -194,7 +194,7 @@
               :auto-upload="false"
               :show-file-list="false"
               :on-change="handleInlineFileSelected"
-              accept=".pdf,.docx,.xlsx,.xls,.pptx,.md,.txt"
+              accept=".pdf,.docx,.xlsx,.xls,.pptx,.md,.txt,.jpg,.jpeg,.png"
             >
               <el-button type="default" size="small" :loading="uploadingInline">
                 <el-icon><component :is="Upload" /></el-icon>
@@ -263,10 +263,10 @@
             <div class="gen-progress-bar">
               <div class="gen-progress-fill" :style="{ width: progress + '%' }"></div>
             </div>
-            <!-- Streaming Preview -->
-            <div class="streaming-preview" v-if="streamingContent">
+            <!-- Streaming Preview (Markdown rendered) -->
+            <div class="streaming-preview" v-if="renderedContent">
               <div class="streaming-header">实时输出</div>
-              <div class="streaming-text">{{ streamingContent }}</div>
+              <div class="streaming-html" v-html="renderedContent"></div>
             </div>
           </div>
 
@@ -295,9 +295,36 @@
             </ul>
           </div>
         </div>
-
       </div>
     </div>
+
+    <!-- 规划阶段弹窗 -->
+    <el-dialog
+      v-model="planDialogVisible"
+      title="确认标书结构"
+      width="560px"
+      :close-on-click-modal="false"
+      class="plan-dialog"
+    >
+      <div class="plan-intro">请确认以下章节结构，生成过程中将按此结构编写各章节内容：</div>
+      <div class="plan-chapters">
+        <div
+          v-for="(ch, idx) in planningChapters"
+          :key="idx"
+          class="plan-chapter-item"
+        >
+          <div class="plan-chapter-num">{{ idx + 1 }}</div>
+          <div class="plan-chapter-body">
+            <div class="plan-chapter-name">{{ ch.name }}</div>
+            <div class="plan-chapter-desc">{{ ch.description }}</div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="planDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmPlanAndGenerate">确认并生成正文</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -307,6 +334,9 @@ import { ElMessage } from "element-plus"
 import { Upload, Document, Files, Check, Download, ArrowRight, Plus } from "@element-plus/icons-vue"
 import { useKbStore } from "../stores/kb"
 import api from "../api"
+import { marked } from "marked"
+// Configure marked for security (no async)
+marked.setOptions({ breaks: true, gfm: true })
 
 const kbStore = useKbStore()
 const bidFile = ref(null)
@@ -318,7 +348,8 @@ const generatedFile = ref(null)
 const reviewResult = ref(null)
 const progress = ref(0)
 const progressMessage = ref("")
-const streamingContent = ref("")
+const streamingContent = ref("")   // 原始 markdown 文本
+const renderedContent = ref("")    // 渲染后的 HTML
 const editingProjectName = ref(false)
 const editingDeadline = ref(false)
 const showRawText = ref(false)
@@ -328,6 +359,8 @@ const uploadingInline = ref(false)
 const inlineUploadRef = ref(null)
 const matchCheckResult = ref(null)  // 匹配度检测结果
 const checkingMatch = ref(false)
+const planningChapters = ref([])    // 规划阶段章节列表
+const planDialogVisible = ref(false) // 规划阶段弹窗
 
 // 素材列表：解析后显示推荐素材（带相关度），未解析时显示知识库全部文档（排除生成的 bid 文件）
 const availableMaterials = computed(() => {
@@ -459,12 +492,36 @@ async function checkMatch() {
 }
 
 async function handleGenerate() {
+  // 阶段1：先调 plan API 获取章节大纲
+  planningChapters.value = []
+  planDialogVisible.value = false
+  try {
+    const resp = await api.post("/api/bid/plan", {
+      parse_result: parseResult.value,
+      materials: selectedMaterials.value
+    })
+    planningChapters.value = resp.data.chapters || []
+  } catch {
+    ElMessage.error("规划章节失败，请重试")
+    return
+  }
+  // 弹出确认框，用户确认后再生成
+  planDialogVisible.value = true
+}
+
+async function confirmPlanAndGenerate() {
+  planDialogVisible.value = false
+  await doGenerate()
+}
+
+async function doGenerate() {
   generating.value = true
   reviewResult.value = null
   generatedFile.value = null
   progress.value = 0
   progressMessage.value = ""
   streamingContent.value = ""
+  renderedContent.value = ""
 
   try {
     const token = localStorage.getItem("token") || ""
@@ -498,7 +555,10 @@ async function handleGenerate() {
           const data = JSON.parse(raw)
           if (data.progress !== undefined) progress.value = data.progress
           if (data.message) progressMessage.value = data.message
-          if (data.delta) streamingContent.value += data.delta
+          if (data.delta) {
+            streamingContent.value += data.delta
+            renderedContent.value = marked.parse(streamingContent.value)
+          }
           if (data.stage === "done") {
             generatedFile.value = {
               name: data.filename,
@@ -1083,6 +1143,85 @@ async function handleGenerate() {
   font-size: 12px;
   color: var(--color-ink-subtle);
   line-height: 1.8;
+}
+
+/* ── Markdown Rendered Preview ── */
+.streaming-html {
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-ink);
+  max-height: 400px;
+  overflow-y: auto;
+}
+.streaming-html :deep(h1) { font-size: 16px; font-weight: 600; margin: 0 0 8px; color: var(--color-ink); }
+.streaming-html :deep(h2) { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--color-ink); }
+.streaming-html :deep(h3) { font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
+.streaming-html :deep(p) { margin: 0 0 8px; }
+.streaming-html :deep(ul), .streaming-html :deep(ol) { margin: 0 0 8px; padding-left: 20px; }
+.streaming-html :deep(li) { margin-bottom: 3px; }
+.streaming-html :deep(table) { border-collapse: collapse; width: 100%; margin-bottom: 8px; font-size: 12px; }
+.streaming-html :deep(th), .streaming-html :deep(td) {
+  border: 1px solid var(--color-hairline-strong);
+  padding: 5px 8px;
+  text-align: left;
+}
+.streaming-html :deep(th) { background: var(--color-surface-2); font-weight: 500; }
+.streaming-html :deep(code) { background: var(--color-surface-2); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.streaming-html :deep(pre) { background: var(--color-surface-2); padding: 10px; border-radius: var(--radius-md); overflow-x: auto; margin-bottom: 8px; }
+.streaming-html :deep(pre code) { background: none; padding: 0; }
+.streaming-html :deep(blockquote) { border-left: 3px solid var(--color-primary); margin: 0 0 8px; padding: 4px 10px; background: rgba(59, 130, 246, 0.05); color: var(--color-ink-subtle); }
+
+/* ── Plan Dialog ── */
+.plan-intro {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.plan-chapters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.plan-chapter-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+}
+.plan-chapter-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.plan-chapter-body {
+  flex: 1;
+}
+.plan-chapter-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+  margin-bottom: 3px;
+}
+.plan-chapter-desc {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  line-height: 1.4;
 }
 
 /* ── Shared ── */

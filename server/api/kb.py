@@ -119,7 +119,7 @@ async def upload_document(file: UploadFile = File(...)):
 
     # 保存文件
     suffix = Path(file.filename).suffix.lower()
-    if suffix not in [".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt"]:
+    if suffix not in [".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt", ".jpg", ".jpeg", ".png"]:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {suffix}")
 
     # 去重：同名文件已存在则直接返回
@@ -141,9 +141,12 @@ async def upload_document(file: UploadFile = File(...)):
     chunks = chunk_text(text)
 
     # 存入 SQLite
+    file_type = suffix.lstrip(".")
+    if file_type in ("jpg", "jpeg", "png"):
+        file_type = "image"
     cur.execute(
         "INSERT INTO documents (filename, file_type, file_path, file_size, status, chunk_count) VALUES (?, ?, ?, ?, ?, ?)",
-        (file.filename, suffix.lstrip("."), str(saved_path), len(content), "ready", len(chunks))
+        (file.filename, file_type, str(saved_path), len(content), "ready", len(chunks))
     )
     doc_id = cur.lastrowid
 

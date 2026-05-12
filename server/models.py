@@ -107,6 +107,15 @@ class BidMatchCheckReq(BaseModel):
     materials: List[int]  # 待检测的素材文档 ID 列表
 
 
+class BidPlanReq(BaseModel):
+    parse_result: dict  # BidParseResp 结果
+    materials: List[int]  # 素材文档 ID 列表
+
+
+class BidPlanResp(BaseModel):
+    chapters: List[dict]  # [{name: str, description: str}]
+
+
 # ============ 标书质检 ============
 class BidReviewResult(BaseModel):
     passed: bool                    # 是否通过

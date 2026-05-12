@@ -13,7 +13,7 @@
         :auto-upload="false"
         :show-file-list="false"
         :on-change="handleFileChange"
-        accept=".pdf,.docx,.xlsx,.xls,.pptx,.md,.txt"
+        accept=".pdf,.docx,.xlsx,.xls,.pptx,.md,.txt,.jpg,.jpeg,.png"
       >
         <el-button type="primary">
           <el-icon><Upload /></el-icon>

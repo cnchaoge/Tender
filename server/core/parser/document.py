@@ -1,6 +1,6 @@
 """
 ClawOS X - 文档解析器
-支持 PDF, Word, Excel, Markdown, TXT
+支持 PDF, Word, Excel, Markdown, TXT, 图片(OCR)
 """
 import os
 from pathlib import Path
@@ -17,6 +17,10 @@ import openpyxl
 
 # PowerPoint
 from pptx import Presentation
+
+# 图片 OCR
+from PIL import Image
+import pytesseract
 
 
 def parse_pdf(file_path: str) -> tuple[str, list[dict]]:
@@ -116,6 +120,43 @@ def parse_txt(file_path: str) -> tuple[str, list[dict]]:
     return content, paragraphs
 
 
+def parse_image(file_path: str) -> tuple[str, list[dict]]:
+    """解析图片（营业执照/身份证等），通过 OCR 提取文字"""
+    try:
+        # 优先用 rapidocr（无需 tesseract，跨平台，中英文都支持）
+        try:
+            from rapidocr import RapidOCR
+            ocr = RapidOCR()
+            result = ocr(file_path)
+            # RapidOCR 3.7: result 是 RapidOCROutput 对象
+            if result and result.txts:
+                lines = [t for t in result.txts if t]
+                text = "\n".join(lines)
+                paragraphs = [{"line": i+1, "text": l} for i, l in enumerate(lines)]
+                return text, paragraphs
+            return "[OCR 未识别到文字]", []
+        except Exception as e:
+            pass
+
+        # 降级：pytesseract（需要系统安装 tesseract + 中文语言包）
+        try:
+            import pytesseract
+            from PIL import Image
+            image = Image.open(file_path)
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            text = pytesseract.image_to_string(image, lang="chi_sim+eng")
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            paragraphs = [{"line": i+1, "text": l} for i, l in enumerate(lines)]
+            return "\n".join(lines), paragraphs
+        except Exception:
+            pass
+
+        return "[OCR 识别失败：未找到可用的 OCR 引擎]", []
+    except Exception as e:
+        return f"[OCR 识别失败: {str(e)}]", []
+
+
 def parse_file(file_path: str) -> tuple[str, list[dict]]:
     """根据文件类型自动选择解析器"""
     ext = Path(file_path).suffix.lower()
@@ -137,6 +178,9 @@ def parse_file(file_path: str) -> tuple[str, list[dict]]:
         ".pptx": parse_pptx,
         ".md": parse_markdown,
         ".txt": parse_txt,
+        ".jpg": parse_image,
+        ".jpeg": parse_image,
+        ".png": parse_image,
     }
 
     parser = parsers.get(ext)
@@ -157,4 +201,7 @@ def get_file_type(filename: str) -> str:
         ".pptx": "pptx",
         ".md": "md",
         ".txt": "txt",
+        ".jpg": "image",
+        ".jpeg": "image",
+        ".png": "image",
     }.get(ext, "unknown")

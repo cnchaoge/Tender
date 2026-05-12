@@ -128,7 +128,7 @@ from server.db.sqlite import get_db
 from server.core.retriever.retriever import retrieve
 from server.core.generator.llm import get_generator
 from server.core.reviewer import review_bid
-from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, Resp
+from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, Resp
 
 router = APIRouter(prefix="/api/bid", tags=["标书生成"])
 settings = get_settings()
@@ -426,6 +426,77 @@ def _format_scoring(scoring: dict) -> str:
         lines.append(f"  废标条件：{'；'.join(disqualify)}")
 
     return "\n".join(lines)
+
+
+@router.post("/plan", response_model=BidPlanResp)
+def plan_bid(req: BidPlanReq):
+    """生成标书目录大纲（规划阶段）"""
+    generator = get_generator()
+
+    # 检索相关素材摘要
+    materials_text = ""
+    if req.materials:
+        conn = get_db()
+        for doc_id in req.materials:
+            cur = conn.cursor()
+            cur.execute("SELECT filename FROM documents WHERE id = ?", (doc_id,))
+            row = cur.fetchone()
+            if row:
+                chunks = retrieve(
+                    f"招标文件：{req.parse_result.get('project_name', '')} {req.parse_result.get('deadline', '')}",
+                    top_k=2, doc_ids=[doc_id]
+                )
+                for chunk in chunks:
+                    materials_text += f"[{row['filename']}]\n{chunk['text'][:500]}\n\n"
+        conn.close()
+
+    scoring_text = _format_scoring(req.parse_result.get("scoring", {}))
+
+    prompt = f"""你是一个专业的招投标文档专家。根据以下招标文件要求，规划投标标书的章节结构。
+
+招标文件信息：
+- 项目名称：{req.parse_result.get('project_name', '未知')}
+- 工期：{req.parse_result.get('deadline', '未知')}
+- 资格要求：{', '.join(req.parse_result.get('requirements', [])) or '未知'}
+- 资质要求：{', '.join(req.parse_result.get('qualification', [])) or '未知'}
+- 评分标准：
+{scoring_text}
+
+可用素材摘要：
+{materials_text[:2000] if materials_text else '无'}
+
+请规划投标标书的章节结构，以JSON格式返回：
+{{
+    "chapters": [
+        {{"name": "第一章 投标函", "description": "投标函正文，包含投标报价、工期承诺等"}},
+        {{"name": "第二章 资格审查文件", "description": "企业资质、业绩证明等"}},
+        ...
+    ]
+}}
+
+要求：
+1. 章节要覆盖招标文件所有资格要求和资质要求
+2. 章节顺序要符合投标标书惯例（投标函 → 资格审查 → 技术标 → 商务标）
+3. 每个章节给一句简短描述，说明该章节包含什么内容
+4. 只返回JSON，不要其他内容"""
+
+    try:
+        raw_llm = generator.generate(prompt, system="你是一个招投标专家，擅长规划投标标书结构。")
+        import json
+        cleaned = _json_clean(raw_llm)
+        result = json.loads(cleaned)
+        chapters = result.get("chapters", [])
+        if not chapters:
+            raise ValueError("LLM 返回的章节列表为空")
+        return BidPlanResp(chapters=chapters)
+    except Exception as e:
+        # 失败时返回默认结构
+        return BidPlanResp(chapters=[
+            {"name": "第一章 投标函", "description": "投标函正文，包含投标报价、工期承诺等"},
+            {"name": "第二章 资格审查文件", "description": "企业资质证明、业绩材料等"},
+            {"name": "第三章 技术标", "description": "施工方案、技术路线、进度计划等"},
+            {"name": "第四章 商务标", "description": "报价明细表、投标保证金等"},
+        ])
 
 
 @router.post("/generate", response_model=dict)
