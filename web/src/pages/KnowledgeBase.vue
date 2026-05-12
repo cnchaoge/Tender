@@ -14,12 +14,19 @@
         :show-file-list="false"
         :on-change="handleFileChange"
         accept=".pdf,.docx,.xlsx,.xls,.pptx,.md,.txt,.jpg,.jpeg,.png"
+        :disabled="uploading"
       >
-        <el-button type="primary">
-          <el-icon><Upload /></el-icon>
+        <el-button type="primary" :loading="uploading">
+          <el-icon v-if="!uploading"><Upload /></el-icon>
           上传文件
         </el-button>
       </el-upload>
+    </div>
+
+    <!-- Upload progress -->
+    <div v-if="uploading" class="upload-progress">
+      <el-progress :percentage="uploadProgress" :stroke-width="6" />
+      <span class="progress-label">正在上传并解析文件...</span>
     </div>
 
     <!-- Table -->
@@ -79,6 +86,8 @@ import { useKbStore } from "../stores/kb"
 
 const kbStore = useKbStore()
 const loading = ref(false)
+const uploading = ref(false)
+const uploadProgress = ref(0)
 const uploadRef = ref(null)
 
 // 按文件名去重（同名保留最早那条）
@@ -96,17 +105,25 @@ onMounted(() => kbStore.fetchDocuments())
 async function handleFileChange(file) {
   const rawFile = file.raw
   if (!rawFile) return
-  loading.value = true
+  uploading.value = true
+  uploadProgress.value = 0
+  // 模拟进度（真实上传中浏览器不会卡住，只是给用户反馈）
+  const interval = setInterval(() => {
+    if (uploadProgress.value < 85) uploadProgress.value += 15
+  }, 200)
   try {
     const formData = new FormData()
     formData.append("file", rawFile)
     await kbStore.uploadDocument(formData)
+    uploadProgress.value = 100
     ElMessage.success("上传成功")
     uploadRef.value?.clearFiles()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || "上传失败")
   } finally {
-    loading.value = false
+    clearInterval(interval)
+    uploading.value = false
+    uploadProgress.value = 0
   }
 }
 
@@ -154,6 +171,20 @@ async function handleDelete(id) {
 .folder-input {
   flex: 1;
   max-width: 380px;
+}
+
+/* ── Upload progress ── */
+.upload-progress {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+}
+.progress-label {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 
 /* ── Table ── */
