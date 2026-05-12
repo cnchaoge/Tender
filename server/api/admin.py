@@ -209,9 +209,17 @@ def save_model_config(body: ModelConfigReq):
         update_env("LLM_PROVIDER", "dashscope")
         update_env("DASHSCOPE_API_KEY", body.api_key)
         update_env("DASHSCOPE_MODEL", body.model or "qwen-turbo")
+    return Resp(message="配置已保存，需重启服务生效")
+
+
+# ============ Embedding 模型配置 ============
+
+@router.post("/embed/config", response_model=Resp)
+def save_embed_config(body: ModelConfigReq):
+    """保存 Embedding 模型配置到 .env"""
     if body.embed_provider:
         update_env("EMBED_PROVIDER", body.embed_provider)
-    return Resp(message="配置已保存，需重启服务生效")
+    return Resp(message="Embedding 配置已保存，需重启服务生效")
 
 
 # ============ 服务重启 ============
