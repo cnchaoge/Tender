@@ -72,17 +72,18 @@ def health():
     return {"status": "ok"}
 
 
-# SPA fallback: 所有非 API 路由都返回 index.html（支持 Vue Router history 模式）
+# SPA fallback: 处理所有非 API 路由
+# 静态资源（/assets/...）也走这里，避免被 mounted handler 拦截
 @app.get("/{path:path}")
 async def spa_fallback(path: str):
-    if WEB_DIST.exists():
-        # 静态资源直接返回
-        asset_path = WEB_DIST / path
-        if asset_path.exists() and asset_path.is_file():
-            return FileResponse(str(asset_path))
-        # 前端路由返回 index.html
-        return FileResponse(str(WEB_DIST / "index.html"))
-    return {"error": "not found"}
+    if not WEB_DIST.exists():
+        return {"error": "not found"}
+    # 静态资源直接返回
+    asset_path = WEB_DIST / path
+    if asset_path.exists() and asset_path.is_file():
+        return FileResponse(str(asset_path))
+    # 前端路由（/settings, /dashboard 等）返回 index.html
+    return FileResponse(str(WEB_DIST / "index.html"))
 
 
 # ---------------------------------------------------------------------------
