@@ -12,8 +12,6 @@ __pycache__/
 *.pyc
 .venv/
 
-# 前端构建
-dist/
 
 # IDE
 .idea/
