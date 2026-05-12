@@ -18,10 +18,6 @@ import openpyxl
 # PowerPoint
 from pptx import Presentation
 
-# 图片 OCR
-from PIL import Image
-import pytesseract
-
 
 def parse_pdf(file_path: str) -> tuple[str, list[dict]]:
     """解析 PDF，返回 (纯文本, [页面文本列表])"""
