@@ -29,7 +29,7 @@ settings = get_settings()
 
 class ModelConfigReq(BaseModel):
     provider: str = "dashscope"  # dashscope | deepseek
-    api_key: str
+    api_key: str = ""
     model: str = ""
     embed_provider: str = ""  # dashscope | bge | m3e | mock
 
