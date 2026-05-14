@@ -2,7 +2,7 @@
 ClawOS X - 认证 API
 """
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -24,7 +24,7 @@ def create_token(data: dict) -> str:
     return jwt.encode(data, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def get_current_user(token: str = OAuth2PasswordBearer(tokenUrl="/api/auth/login")):
+def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id = payload.get("sub")
@@ -62,12 +62,12 @@ def login(req: LoginReq):
 
 
 @router.post("/logout")
-def logout(token: str = OAuth2PasswordBearer(tokenUrl="/api/auth/login")):
+def logout(token: str = Depends(oauth2_scheme)):
     return {"message": "ok"}
 
 
 @router.get("/me", response_model=UserInfo)
-def me(token: str = OAuth2PasswordBearer(tokenUrl="/api/auth/login")):
+def me(token: str = Depends(oauth2_scheme)):
     user = get_current_user(token)
     conn = get_db()
     cur = conn.cursor()
