@@ -3,8 +3,10 @@ ClawOS X - 标书生成 API
 """
 import re
 import uuid
+from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from pathlib import Path
 from docx import Document as DocxDocument
 from docx.shared import Pt, Inches
@@ -128,6 +130,8 @@ from server.db.sqlite import get_db
 from server.core.retriever.retriever import retrieve
 from server.core.generator.llm import get_generator
 from server.core.reviewer import review_bid
+from server.tools.violation_checker import get_violation_checker
+from server.tools.plagiarism_checker import get_plagiarism_checker
 from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, Resp
 
 router = APIRouter(prefix="/api/bid", tags=["标书生成"])
@@ -647,6 +651,31 @@ async def generate_bid_stream(req: BidGenerateReq):
 输出格式：Markdown"""
 
     async def stream_response():
+        # 阶段0：生成前废标项预检
+        yield _sse_event({"stage": "violation_check", "progress": 5, "message": "正在检测废标项风险..."})
+        
+        # 废标项检查（generate 阶段：检测标书正文是否满足招标文件要求）
+        violation_checker = get_violation_checker()
+        violation_result = None
+        if req.parse_result:
+            violation_result = violation_checker.check_bid_content(
+                "",  # 还没生成，先用 parse_result 做生成前检查
+                req.parse_result
+            )
+            # 如果有必废标项，中断生成流程
+            if not violation_result["passed"]:
+                yield _sse_event({
+                    "stage": "violation_fail",
+                    "progress": 0,
+                    "message": "检测到废标风险，生成已中止",
+                    "violation_result": {
+                        "passed": False,
+                        "violations": violation_result["violations"],
+                        "summary": violation_result["summary"],
+                    }
+                })
+                return
+
         # 阶段1：生成中
         yield _sse_event({"stage": "generating", "progress": 10, "message": "正在生成标书正文..."})
 
@@ -657,6 +686,21 @@ async def generate_bid_stream(req: BidGenerateReq):
             yield _sse_event({"stage": "generating", "progress": 30, "message": "生成中...", "delta": delta})
 
         content = "".join(content_parts)
+        content = "".join(content_parts)
+        
+        # ── 阶段2：废标项检测（基于生成的标书正文）───────────────────────
+        yield _sse_event({"stage": "violation_check", "progress": 65, "message": "废标项合规性检测..."})
+        if req.parse_result:
+            violation_result = violation_checker.check_bid_content(content, req.parse_result)
+            if not violation_result["passed"]:
+                yield _sse_event({
+                    "stage": "violation_warn",
+                    "progress": 65,
+                    "message": "存在废标风险项，请留意",
+                    "violation_result": violation_result,
+                })
+        
+        # 阶段3：质检
         yield _sse_event({"stage": "reviewing", "progress": 70, "message": "AI 质检审核中..."})
 
         # 阶段2：质检
@@ -676,13 +720,21 @@ async def generate_bid_stream(req: BidGenerateReq):
             review = review_bid(content, req.parse_result)
             yield _sse_event({"stage": "reviewing", "progress": 90, "message": "重新审核中..."})
 
-        # 阶段3：生成 Word
+        # ── 阶段4：标书查重 ──────────────────────────────────────────
+        yield _sse_event({"stage": "plagiarism_check", "progress": 88, "message": "标书查重检测..."})
+        plagiarism_checker = get_plagiarism_checker()
+        plagiarism_result = plagiarism_checker.check(
+            bid_content=content,
+            exclude_doc_ids=req.materials or [],
+        )
+        
+        # 阶段5：生成 Word
         yield _sse_event({"stage": "word", "progress": 95, "message": "正在生成 Word 文件..."})
         doc = _docx_from_markdown(content, req.parse_result.get("project_name", "投标标书"))
         output_path = GENERATED_DIR / f"bid_{uuid.uuid4().hex[:8]}.docx"
         doc.save(str(output_path))
 
-        # 完成
+        # 阶段6：完成
         yield _sse_event({
             "stage": "done",
             "progress": 100,
@@ -693,7 +745,14 @@ async def generate_bid_stream(req: BidGenerateReq):
                 "passed": review["passed"],
                 "score": review.get("score", 0),
                 "issues": review.get("issues", []),
-            }
+            },
+            "violation_result": violation_result,
+            "plagiarism_result": {
+                "passed": plagiarism_result["passed"],
+                "overall_score": plagiarism_result["overall_score"],
+                "high_risk_sections": plagiarism_result["high_risk_sections"],
+                "sections": [{"section_name": s["section_name"], "risk_level": s["risk_level"], "similarity_score": s["similarity_score"]} for s in plagiarism_result["sections"]],
+            },
         })
 
     return StreamingResponse(
@@ -712,6 +771,69 @@ def download_bid(filename: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(str(path), filename=filename, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+@router.post("/analyze-old/{doc_id}")
+def analyze_old_bid(doc_id: int):
+    """拆解历史投标标书为结构化章节并存入向量库"""
+    from server.tools.bid_analyzer import analyze_old_bid, store_analyzed_sections
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
+    doc = cur.fetchone()
+    conn.close()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    from server.core.parser.document import parse_file
+    text, _ = parse_file(doc["file_path"])
+
+    if len(text.strip()) < 200:
+        raise HTTPException(status_code=400, detail="文档内容太少（< 200 字），无法解析")
+
+    sections = analyze_old_bid(text)
+    if not sections:
+        return Resp(code=1, message="未能识别出标书章节结构，请确认文件是否为投标标书")
+
+    stored = store_analyzed_sections(doc_id, sections)
+    return Resp(data={
+        "doc_id": doc_id,
+        "filename": doc["filename"],
+        "section_count": len(sections),
+        "sections": [{
+            "section_name": s.get("section_name"),
+            "section_type": s.get("section_type"),
+            "key_info": s.get("key_info"),
+        } for s in sections],
+    })
+
+
+@router.get("/analyze-old/{doc_id}/sections")
+def get_analyzed_sections(doc_id: int):
+    """查看历史标书拆解结果"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT * FROM chunks
+        WHERE doc_id = ? AND json_extract(metadata, '$.source_type') = 'bid_section'
+        ORDER BY chunk_index
+    """, (doc_id,))
+    rows = cur.fetchall()
+    conn.close()
+
+    if not rows:
+        return Resp(code=1, message="该文档尚未进行标书拆解分析")
+
+    import json
+    return Resp(data=[{
+        "section_name": json.loads(r["metadata"]).get("section_name", ""),
+        "section_type": json.loads(r["metadata"]).get("section_type", ""),
+        "key_info": json.loads(r["metadata"]).get("key_info", ""),
+        "content": r["text"],
+        "chunk_index": r["chunk_index"],
+    } for r in rows])
 
 
 @router.post("/match_check")
@@ -783,3 +905,96 @@ def match_check(req: BidMatchCheckReq):
         },
         "warning": "部分素材与招标文件匹配度较低，建议更换或补充相关素材" if low_count > 0 else None,
     }
+
+
+# ── 废标项检查 ─────────────────────────────────────────────────────────────────
+
+
+class ViolationCheckReq(BaseModel):
+    parse_result: Optional[dict] = None        # 招标文件解析结果
+    bid_content: Optional[str] = None          # 标书正文（generate 阶段检测）
+    raw_text: Optional[str] = None             # 招标文件原文（parse 阶段检测）
+    check_stage: Optional[str] = "auto"       # auto | parse | generate | review
+
+
+class ViolationCheckResp(BaseModel):
+    passed: bool
+    violations: List[dict]
+    warnings: List[dict]
+    summary: dict
+
+
+@router.post("/violation_check", response_model=ViolationCheckResp)
+def check_violations(req: ViolationCheckReq):
+    """
+    废标项检查接口
+    
+    - check_stage=parse：检测招标文件本身的合规性（是否有废标条件）
+    - check_stage=generate：检测生成的标书正文是否满足招标文件要求
+    - check_stage=review：合并两阶段检测
+    """
+    checker = get_violation_checker()
+    
+    stage = req.check_stage if req.check_stage != "auto" else None
+    
+    # 自动判断阶段
+    if req.bid_content and req.parse_result:
+        # 生成阶段 + 质检阶段合并检测
+        result = checker.check_bid_content(req.bid_content, req.parse_result)
+    elif req.bid_content:
+        result = checker.check_document(req.bid_content, stage=stage or "review")
+    elif req.parse_result:
+        result = checker.check_parse_result(req.parse_result, req.raw_text or "")
+    else:
+        raise HTTPException(status_code=400, detail="缺少检测内容：bid_content 或 parse_result 二选一")
+    
+    return result
+
+
+@router.get("/disqualify_rules")
+def list_disqualify_rules():
+    """获取废标红线规则列表（供管理后台展示）"""
+    checker = get_violation_checker()
+    return checker.get_disqualify_rules()
+
+
+@router.get("/violation_cases")
+def list_violation_cases(category: str = None):
+    """获取违规案例库（可按类别过滤）"""
+    checker = get_violation_checker()
+    return checker.get_violation_cases(category)
+
+
+# ── 标书查重 ──────────────────────────────────────────────────────────────────
+
+
+class PlagiarismCheckReq(BaseModel):
+    bid_content: str                    # 待检测的标书正文（Markdown）
+    exclude_doc_ids: Optional[List[int]] = None   # 排除的文档ID
+
+
+class PlagiarismCheckResp(BaseModel):
+    passed: bool
+    overall_score: float
+    total_sections: int
+    high_risk_sections: int
+    sections: List[dict]
+    summary: dict
+
+
+@router.post("/plagiarism_check", response_model=PlagiarismCheckResp)
+def check_plagiarism(req: PlagiarismCheckReq):
+    """
+    标书查重接口
+    检测新生成的标书与知识库中已有标书的相似程度。
+    相似度超过 85% 的章节会被标记为高风险。
+    """
+    if not req.bid_content or len(req.bid_content.strip()) < 100:
+        raise HTTPException(status_code=400, detail="标书内容太短，无法进行查重检测")
+    
+    checker = get_plagiarism_checker()
+    result = checker.check(
+        bid_content=req.bid_content,
+        exclude_doc_ids=req.exclude_doc_ids or [],
+    )
+    return result

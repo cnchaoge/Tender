@@ -18,6 +18,7 @@ const routes = [
       { path: "kb", name: "KnowledgeBase", component: () => import("../pages/KnowledgeBase.vue") },
       { path: "chat", name: "RAGChat", component: () => import("../pages/RAGChat.vue") },
       { path: "bid", name: "BidGenerate", component: () => import("../pages/BidGenerate.vue") },
+      { path: "bid-analyze", name: "BidAnalyze", component: () => import("../pages/BidAnalyze.vue") },
       { path: "settings", name: "Settings", component: () => import("../pages/Settings.vue") },
     ]
   }

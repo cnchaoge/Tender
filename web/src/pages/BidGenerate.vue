@@ -294,6 +294,58 @@
               <li v-for="issue in reviewResult.issues" :key="issue">{{ issue }}</li>
             </ul>
           </div>
+
+          <!-- Done: 废标项检测结果 -->
+          <div v-if="violationResult && !generating && !violationResult.passed" class="violation-panel fail">
+            <div class="violation-header">
+              <span class="violation-icon">🚨</span>
+              <span class="violation-title">废标风险检测</span>
+              <span class="violation-badge">存在风险</span>
+            </div>
+            <div class="violation-summary">
+              共 {{ violationResult.summary?.total_violations || 0 }} 项，
+              <span class="disqualify" v-if="violationResult.summary?.disqualify_count > 0">
+                含 {{ violationResult.summary.disqualify_count }} 项必废标项
+              </span>
+              <span class="high-risk" v-else>
+                含 {{ violationResult.summary?.high_risk_count || 0 }} 项高风险项
+              </span>
+            </div>
+            <ul class="violation-list">
+              <li v-for="(v, i) in violationResult.violations" :key="i" class="violation-item" :class="{ disqualify: v.is_disqualify }">
+                <div class="violation-name">{{ v.rule_name }}</div>
+                <div class="violation-fix">{{ v.fix_suggestion }}</div>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Done: 标书查重结果 -->
+          <div v-if="plagiarismResult && !generating" class="plagiarism-panel" :class="{ 'has-risk': !plagiarismResult.passed }">
+            <div class="plagiarism-header">
+              <span class="plagiarism-icon">🔍</span>
+              <span class="plagiarism-title">标书查重</span>
+              <span class="plagiarism-score" :class="plagiarismResult.overall_score > 60 ? 'high' : plagiarismResult.overall_score > 30 ? 'mid' : 'low'">
+                {{ plagiarismResult.overall_score }}% 相似度
+              </span>
+            </div>
+            <div class="plagiarism-summary" v-if="plagiarismResult.high_risk_sections > 0">
+              发现 {{ plagiarismResult.high_risk_sections }} 个高重复章节，建议人工确认
+            </div>
+            <div class="plagiarism-sections" v-if="plagiarismResult.sections?.length">
+              <div
+                v-for="sec in plagiarismResult.sections.filter(s => s.risk_level !== 'low')"
+                :key="sec.section_index"
+                class="plagiarism-sec-item"
+                :class="sec.risk_level"
+              >
+                <span class="sec-name">{{ sec.section_name }}</span>
+                <span class="sec-score">{{ sec.similarity_score }}%</span>
+                <span v-if="sec.matched_bids?.length" class="sec-source">
+                  相似于：{{ sec.matched_bids[0].filename }}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -361,6 +413,8 @@ const matchCheckResult = ref(null)  // 匹配度检测结果
 const checkingMatch = ref(false)
 const planningChapters = ref([])    // 规划阶段章节列表
 const planDialogVisible = ref(false) // 规划阶段弹窗
+const violationResult = ref(null)   // 废标项检测结果
+const plagiarismResult = ref(null)   // 标书查重结果
 
 // 素材列表：解析后显示推荐素材（带相关度），未解析时显示知识库全部文档（排除生成的 bid 文件）
 const availableMaterials = computed(() => {
@@ -559,12 +613,24 @@ async function doGenerate() {
             streamingContent.value += data.delta
             renderedContent.value = marked.parse(streamingContent.value)
           }
+          if (data.stage === "violation_fail") {
+            // 严重废标风险，中断生成
+            violationResult.value = data.violation_result
+            generating.value = false
+            ElMessage.error("检测到废标风险，生成已中止！请检查标书内容后重试")
+            return
+          }
+          if (data.stage === "violation_warn") {
+            violationResult.value = data.violation_result
+          }
           if (data.stage === "done") {
             generatedFile.value = {
               name: data.filename,
               url: `${import.meta.env.VITE_API_URL}/api/bid/download/${data.filename}`,
             }
             reviewResult.value = data.review || null
+            if (data.violation_result) violationResult.value = data.violation_result
+            if (data.plagiarism_result) plagiarismResult.value = data.plagiarism_result
           }
         } catch {}
       }
@@ -1144,6 +1210,118 @@ async function doGenerate() {
   color: var(--color-ink-subtle);
   line-height: 1.8;
 }
+
+/* ── Violation Panel ── */
+.violation-panel {
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin-top: 8px;
+}
+.violation-panel.fail {
+  background: rgba(245, 108, 108, 0.08);
+  border: 1px solid rgba(245, 108, 108, 0.25);
+}
+.violation-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.violation-icon { font-size: 16px; }
+.violation-title { font-size: 13px; font-weight: 600; color: var(--color-ink); }
+.violation-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: rgba(245, 108, 108, 0.12);
+  color: var(--color-semantic-error);
+}
+.violation-summary {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  margin-bottom: 8px;
+}
+.violation-summary .disqualify { color: var(--color-semantic-error); font-weight: 600; }
+.violation-summary .high-risk { color: var(--color-semantic-warning); font-weight: 500; }
+.violation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.violation-item {
+  background: rgba(255,255,255,0.6);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.violation-item.disqualify {
+  background: rgba(245, 108, 108, 0.12);
+  border-left: 3px solid var(--color-semantic-error);
+}
+.violation-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink);
+  margin-bottom: 3px;
+}
+.violation-fix {
+  font-size: 11px;
+  color: var(--color-ink-tertiary);
+}
+
+/* ── Plagiarism Panel ── */
+.plagiarism-panel {
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin-top: 8px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+}
+.plagiarism-panel.has-risk {
+  background: rgba(245, 108, 108, 0.05);
+  border-color: rgba(245, 108, 108, 0.2);
+}
+.plagiarism-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.plagiarism-icon { font-size: 14px; }
+.plagiarism-title { font-size: 13px; font-weight: 600; color: var(--color-ink); }
+.plagiarism-score { font-size: 12px; font-weight: 600; margin-left: auto; }
+.plagiarism-score.high { color: var(--color-semantic-error); }
+.plagiarism-score.mid { color: var(--color-semantic-warning); }
+.plagiarism-score.low { color: var(--color-semantic-success); }
+.plagiarism-summary {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  margin-bottom: 8px;
+}
+.plagiarism-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.plagiarism-sec-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+.plagiarism-sec-item.high { background: rgba(245, 108, 108, 0.1); }
+.plagiarism-sec-item.mid { background: rgba(230, 162, 60, 0.1); }
+.plagiarism-sec-item.low { background: rgba(39, 166, 68, 0.08); }
+.plagiarism-sec-item .sec-name { color: var(--color-ink); flex: 1; }
+.plagiarism-sec-item .sec-score { font-weight: 600; }
+.plagiarism-sec-item.high .sec-score { color: var(--color-semantic-error); }
+.plagiarism-sec-item.mid .sec-score { color: var(--color-semantic-warning); }
+.plagiarism-sec-item .sec-source { font-size: 11px; color: var(--color-ink-tertiary); }
 
 /* ── Markdown Rendered Preview ── */
 .streaming-html {

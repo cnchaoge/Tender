@@ -20,12 +20,19 @@ from contextlib import asynccontextmanager
 import threading
 
 from server.db.sqlite import init_db
+from server.db.violation_db import init_violation_db
 from server.api import auth, kb, rag, bid, admin
+
+
+def _init_all_dbs():
+    """初始化所有数据库"""
+    init_db()
+    init_violation_db()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    _init_all_dbs()
     yield
 
 
