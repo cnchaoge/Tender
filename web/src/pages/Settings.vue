@@ -247,6 +247,7 @@ async function saveEmbed() {
     currentEmbedName.value = cfg.value.embed_provider
     ElMessage.success("Embedding 配置已保存，需重启服务生效")
   } catch (e) {
+    console.error("saveEmbed error:", e.response?.data || e.message)
     ElMessage.error("保存失败")
   } finally {
     saving.value = false
