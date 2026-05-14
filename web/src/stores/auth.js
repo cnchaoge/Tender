@@ -14,7 +14,9 @@ export const useAuthStore = defineStore("auth", () => {
     user.value = resp.data.user
     localStorage.setItem("token", token.value)
     localStorage.setItem("user", JSON.stringify(user.value))
-    api.defaults.headers.common["Authorization"] = `Bearer ${token.value}`
+    if (api.defaults?.headers?.common) {
+      api.defaults.headers.common["Authorization"] = `Bearer ${token.value}`
+    }
     return resp.data
   }
 
@@ -23,11 +25,13 @@ export const useAuthStore = defineStore("auth", () => {
     user.value = null
     localStorage.removeItem("token")
     localStorage.removeItem("user")
-    delete api.defaults.headers.common["Authorization"]
+    if (api.defaults?.headers?.common) {
+      delete api.defaults.headers.common["Authorization"]
+    }
   }
 
   // 初始化时设置 token
-  if (token.value) {
+  if (token.value && api.defaults?.headers?.common) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token.value}`
   }
 
