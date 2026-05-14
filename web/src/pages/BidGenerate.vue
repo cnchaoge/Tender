@@ -391,6 +391,10 @@ import { marked } from "marked"
 marked.setOptions({ breaks: true, gfm: true })
 
 const kbStore = useKbStore()
+// 统一 API 基础路径：dev 走相对路径（Vite proxy），prod 用完整 URL
+function apiBase() {
+  return import.meta.env.DEV ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000")
+}
 const bidFile = ref(null)
 const bidDocId = ref(null)  // 上传的招标文件 doc_id，不参与素材选择
 const parseResult = ref(null)
@@ -579,7 +583,7 @@ async function doGenerate() {
 
   try {
     const token = localStorage.getItem("token") || ""
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/bid/generate/stream`, {
+    const response = await fetch(`${apiBase()}/api/bid/generate/stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -626,7 +630,7 @@ async function doGenerate() {
           if (data.stage === "done") {
             generatedFile.value = {
               name: data.filename,
-              url: `${import.meta.env.VITE_API_URL}/api/bid/download/${data.filename}`,
+              url: `${apiBase()}/api/bid/download/${data.filename}`,
             }
             reviewResult.value = data.review || null
             if (data.violation_result) violationResult.value = data.violation_result

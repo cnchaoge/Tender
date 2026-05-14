@@ -1,7 +1,10 @@
 import axios from "axios"
 
+const isDev = import.meta.env.DEV
+
+// axios 实例：dev 模式走相对路径（由 Vite proxy 转发），生产模式用完整 URL
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
+  baseURL: isDev ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000"),
   timeout: 60000
 })
 
@@ -52,7 +55,10 @@ const bid = {
     parse_result: parseResult,
     materials
   }, { timeout: 300000 }),
-  download: (filename) => `${api.defaults.baseURL}/api/bid/download/${filename}`,
+  download: (filename) => {
+    const base = isDev ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000")
+    return `${base}/api/bid/download/${filename}`
+  },
   matchCheck: (parseResult, materials) =>
     api.post("/api/bid/match_check", { parse_result: parseResult, materials }),
   analyzeOld: (docId) => api.post(`/api/bid/analyze-old/${docId}`),
