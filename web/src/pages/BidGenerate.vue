@@ -929,6 +929,7 @@ async function doGenerate() {
         parse_result: parseResult.value,
         materials: selectedMaterials.value,
         chapters: planningChapters.value,
+        strategy: selectedStrategy.value,
       })
     })
     if (!response.ok) {
@@ -953,6 +954,25 @@ async function doGenerate() {
           if (data.delta) {
             streamingContent.value += data.delta
             renderedContent.value = marked.parse(streamingContent.value)
+          }
+          // Chapter-level events
+          if (data.stage === "chapter_start") {
+            const idx = data.chapter_index
+            if (chapterStates.value[idx] !== undefined) {
+              chapterStates.value[idx] = { ...chapterStates.value[idx], status: "generating", progress: 0 }
+            }
+          }
+          if (data.stage === "chapter_progress") {
+            const idx = data.chapter_index
+            if (chapterStates.value[idx] !== undefined) {
+              chapterStates.value[idx] = { ...chapterStates.value[idx], progress: data.progress }
+            }
+          }
+          if (data.stage === "chapter_done") {
+            const idx = data.chapter_index
+            if (chapterStates.value[idx] !== undefined) {
+              chapterStates.value[idx] = { ...chapterStates.value[idx], status: "completed", progress: 100 }
+            }
           }
           if (data.stage === "violation_fail") {
             // 严重废标风险，中断生成
@@ -1531,6 +1551,58 @@ async function doGenerate() {
   gap: 16px;
 }
 
+/* ── Strategy Selector ── */
+.strategy-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.strategy-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.strategy-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.strategy-option {
+  cursor: pointer;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  transition: all 0.15s;
+  background: var(--color-surface-2);
+}
+.strategy-option:hover {
+  border-color: var(--color-primary);
+  background: rgba(94, 105, 209, 0.04);
+}
+.strategy-option.active {
+  border-color: var(--color-primary);
+  background: rgba(94, 105, 209, 0.08);
+}
+.strategy-option-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.strategy-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.strategy-option.active .strategy-name {
+  color: var(--color-primary);
+}
+.strategy-desc {
+  font-size: 11px;
+  color: var(--color-ink-tertiary);
+}
+
 .generate-btn {
   width: 100%;
   height: 42px;
@@ -1569,6 +1641,33 @@ async function doGenerate() {
   background: var(--color-primary);
   border-radius: 2px;
   transition: width 0.3s ease;
+}
+
+/* ── Chapter Progress ── */
+.chapter-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.chapter-progress-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.chapter-name {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  min-width: 80px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chapter-bar-wrap {
+  flex: 1;
+}
+.chapter-bar-wrap .el-progress {
+  --el-progress-text-color: var(--color-ink-subtle);
 }
 
 .streaming-preview {

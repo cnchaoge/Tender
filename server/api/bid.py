@@ -352,25 +352,30 @@ def parse_bid_file(req: BidParseReq):
         # 注入体检结果
         result["parse_meta"]["health_check"] = health
 
-        # RAG 素材预关联：用 project_name + requirements[0] 检索相关素材
-        recommended_materials = []
+        # RAG 素材预关联（容错：解析失败时跳过，不阻断主流程）
         project_name = result.get("project_name", "")
-        requirements = result.get("requirements", [])
-        req0 = requirements[0] if requirements else ""
-
-        if project_name and req0:
-            query = f"{project_name} {req0}"
-            chunks = retrieve(query, top_k=3)
-            doc_ids_seen = set()
-            for chunk in chunks:
-                doc_id = chunk.get("doc_id")
-                if doc_id and doc_id not in doc_ids_seen:
-                    doc_ids_seen.add(doc_id)
-                    recommended_materials.append({
-                        "id": doc_id,
-                        "filename": chunk.get("filename", ""),
-                        "relevance_score": round(chunk.get("score", 0.0), 2)
-                    })
+        recommended_materials = []
+        if not project_name or project_name in ("解析失败", "未识别到项目名称"):
+            pass
+        else:
+            try:
+                requirements = result.get("requirements", [])
+                req0 = requirements[0] if requirements else ""
+                if project_name and req0:
+                    query = f"{project_name} {req0}"
+                    chunks = retrieve(query, top_k=3)
+                    doc_ids_seen = set()
+                    for chunk in chunks:
+                        doc_id = chunk.get("doc_id")
+                        if doc_id and doc_id not in doc_ids_seen:
+                            doc_ids_seen.add(doc_id)
+                            recommended_materials.append({
+                                "id": doc_id,
+                                "filename": chunk.get("filename", ""),
+                                "relevance_score": round(chunk.get("score", 0.0), 2)
+                            })
+            except Exception:
+                pass
 
         return BidParseResp(
             raw_text=text[:2000],
@@ -610,7 +615,7 @@ def _get_strategy_guidance(strategy: str) -> str:
     """根据策略返回对应的投标策略指导文本"""
     strategies = {
         "技术优先型": "【投标策略】：技术优先型\n- 侧重技术方案完整性、创新点、工程质量保障措施\n- 技术标内容要详细、专业，突出企业技术优势和施工能力\n- 适当弱化价格因素，以技术方案得分最大化为目标\n- 注重施工工艺、质量控制体系、安全文明施工等章节的深度",
-        "成本控制型": "【投标策略】：成本控制型\n- 侧重成本优化、施工方案经济性、项目利润最大化\n- 在满足招标要求的前提下，尽量压缩成本，提高利润率\n- 报价策略优先，采用有竞争力的价格策略\n- 技术方案以"合格"为标准，不过度展开，简明扼要即可",
+        "成本控制型": "【投标策略】：成本控制型\n- 侧重成本优化、施工方案经济性、项目利润最大化\n- 在满足招标要求的前提下，尽量压缩成本，提高利润率\n- 报价策略优先，采用有竞争力的价格策略\n- 技术方案以「合格」为标准，不过度展开，简明扼要即可",
         "综合均衡型": "【投标策略】：综合均衡型\n- 技术和价格平衡，在满足招标要求的前提下追求性价比最优\n- 技术方案完整、专业，但不过度冗余\n- 报价合理有竞争力，既不过高也不恶性低价\n- 标书整体均衡、专业、完整，能满足评标的各方面要求",
     }
     return strategies.get(strategy, strategies["综合均衡型"])
