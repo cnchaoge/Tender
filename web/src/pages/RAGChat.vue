@@ -11,8 +11,8 @@
       <div class="messages" ref="messagesEl">
         <div v-if="!messages.length" class="chat-empty">
           <div class="chat-empty-icon">💬</div>
-          <div class="chat-empty-title">开始对话</div>
-          <div class="chat-empty-desc">上传文档后，基于知识库回答问题</div>
+          <div class="chat-empty-title">问我关于文档的问题</div>
+          <div class="chat-empty-desc">上传文档后，基于知识库回答你的任何问题</div>
         </div>
 
         <div
@@ -26,7 +26,7 @@
             <el-icon v-else><component :is="User" /></el-icon>
           </div>
           <div class="msg-bubble">
-            <div class="msg-text">{{ msg.content }}</div>
+            <div class="msg-text" v-html="renderMarkdown(msg.content)"></div>
             <div v-if="msg.sources?.length" class="sources">
               <div class="sources-label">参考来源</div>
               <div
@@ -79,7 +79,16 @@
 import { ref, nextTick } from "vue"
 import { ElMessage } from "element-plus"
 import { Loading, MagicStick, User, Promotion } from "@element-plus/icons-vue"
+import { marked } from "marked"
 import api from "../api"
+
+// Configure marked
+marked.setOptions({ breaks: true, gfm: true })
+
+function renderMarkdown(text) {
+  if (!text) return ""
+  return marked.parse(text)
+}
 
 const question = ref("")
 const messages = ref([])
@@ -205,8 +214,8 @@ function scrollBottom() {
   margin-top: 2px;
 }
 .msg-row.assistant .msg-avatar {
-  background: rgba(94, 105, 209, 0.1);
-  border-color: rgba(94, 105, 209, 0.2);
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.2);
   color: var(--color-primary);
 }
 
@@ -227,13 +236,31 @@ function scrollBottom() {
 .msg-row.assistant .msg-text {
   background: var(--color-surface-2);
   color: var(--color-ink);
-  border-bottom-left-radius: var(--radius-xs);
+  border-bottom-left-radius: 4px;
 }
 .msg-row.user .msg-text {
   background: var(--color-primary);
-  color: var(--color-on-primary);
-  border-bottom-right-radius: var(--radius-xs);
+  color: #fff;
+  border-bottom-right-radius: 4px;
 }
+
+/* ── Markdown rendered in bubbles ── */
+.msg-text :deep(p) { margin: 0 0 6px; }
+.msg-text :deep(p:last-child) { margin-bottom: 0; }
+.msg-text :deep(ul), .msg-text :deep(ol) { margin: 0 0 6px; padding-left: 18px; }
+.msg-text :deep(li) { margin-bottom: 2px; }
+.msg-text :deep(strong) { font-weight: 600; color: var(--color-ink); }
+.msg-text :deep(code) { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+.msg-text :deep(pre) { background: rgba(0,0,0,0.06); padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 4px 0; }
+.msg-text :deep(pre code) { background: none; padding: 0; }
+.msg-text :deep(blockquote) { border-left: 3px solid rgba(59,130,246,0.4); margin: 4px 0; padding: 2px 10px; color: var(--color-ink-subtle); }
+.msg-text :deep(table) { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 6px; }
+.msg-text :deep(th), .msg-text :deep(td) { border: 1px solid var(--color-hairline); padding: 4px 8px; text-align: left; }
+.msg-text :deep(th) { background: var(--color-surface-3); font-weight: 500; }
+.msg-text :deep(h1), .msg-text :deep(h2), .msg-text :deep(h3) { font-weight: 600; margin: 0 0 4px; }
+.msg-text :deep(h1) { font-size: 15px; }
+.msg-text :deep(h2) { font-size: 14px; }
+.msg-text :deep(h3) { font-size: 13px; }
 
 .loading-bubble {
   display: flex;

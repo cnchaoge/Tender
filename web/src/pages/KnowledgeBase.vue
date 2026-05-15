@@ -70,8 +70,13 @@
       <!-- Empty State -->
       <div v-if="!kbStore.documents.length && !kbStore.loading" class="empty-state">
         <div class="empty-icon">📂</div>
-        <div class="empty-title">暂无文档</div>
-        <div class="empty-desc">上传施工方案、标准合同等素材，构建知识库</div>
+        <div class="empty-title">知识库为空</div>
+        <div class="empty-desc">还没有上传任何文档</div>
+        <div class="empty-hint">上传第一份文档，开启 AI 助手之旅</div>
+        <el-button type="primary" size="default" class="empty-upload-btn" @click="focusUpload">
+          <el-icon><component :is="Upload" /></el-icon>
+          立即上传
+        </el-button>
       </div>
     </div>
 
@@ -89,6 +94,10 @@ const loading = ref(false)
 const uploading = ref(false)
 const uploadProgress = ref(0)
 const uploadRef = ref(null)
+
+function focusUpload() {
+  uploadRef.value?.$el?.querySelector('input')?.click()
+}
 
 // 按文件名去重（同名保留最早那条）
 const dedupedDocuments = computed(() => {
@@ -254,6 +263,15 @@ async function handleDelete(id) {
 .empty-desc {
   font-size: 13px;
   color: var(--color-ink-tertiary);
+  margin-bottom: 4px;
+}
+.empty-hint {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  margin-bottom: 20px;
+}
+.empty-upload-btn {
+  margin-top: 4px;
 }
 
 /* ── Responsive ── */

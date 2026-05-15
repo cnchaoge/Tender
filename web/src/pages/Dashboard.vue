@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard-page">
 
-    <!-- Hero Banner -->
+    <!-- ── Hero Banner ── -->
     <div class="hero-banner">
       <div class="hero-left">
         <div class="hero-brand">
@@ -10,6 +10,15 @@
         </div>
         <h1 class="hero-title">制造业投标标书<br>AI 一键生成</h1>
         <p class="hero-desc">上传产品资料 · 选择模板 · 生成专业投标文件</p>
+        <div class="hero-actions">
+          <router-link to="/bid" class="btn-primary">
+            开始使用
+            <span class="btn-arrow">→</span>
+          </router-link>
+          <router-link to="/chat" class="btn-ghost">
+            了解更多
+          </router-link>
+        </div>
       </div>
       <div class="hero-right">
         <div class="security-badge">
@@ -22,7 +31,7 @@
       </div>
     </div>
 
-    <!-- Stats Row -->
+    <!-- ── Stats Row ── -->
     <div class="stats-row">
       <div class="stat-item">
         <div class="stat-num">{{ stats.document_count ?? 0 }}</div>
@@ -40,19 +49,60 @@
       </div>
     </div>
 
-    <!-- Quick Actions -->
-    <div class="section-title">快速开始</div>
+    <!-- ── 核心功能卡片 ── -->
+    <div class="section-header">
+      <div class="section-title">核心功能</div>
+      <div class="section-sub">一站式投标标书 AI 解决方案</div>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card" v-for="f in features" :key="f.title">
+        <div class="fc-icon">{{ f.icon }}</div>
+        <div class="fc-title">{{ f.title }}</div>
+        <div class="fc-desc">{{ f.desc }}</div>
+        <router-link :to="f.path" class="fc-link">
+          立即使用 <span>→</span>
+        </router-link>
+      </div>
+    </div>
+
+    <!-- ── 产品优势 ── -->
+    <div class="section-header">
+      <div class="section-title">产品优势</div>
+    </div>
+    <div class="advantages-row">
+      <div class="adv-item" v-for="a in advantages" :key="a.title">
+        <div class="adv-icon">{{ a.icon }}</div>
+        <div class="adv-text">
+          <div class="adv-title">{{ a.title }}</div>
+          <div class="adv-desc">{{ a.desc }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 快捷入口 ── -->
+    <div class="section-header">
+      <div class="section-title">快捷入口</div>
+    </div>
     <div class="quick-grid">
-      <router-link to="/kb" class="quick-card qc-blue">
-        <div class="qc-icon">📄</div>
+      <router-link to="/bid" class="quick-card qc-blue">
+        <div class="qc-icon">📋</div>
         <div class="qc-body">
-          <div class="qc-title">上传文档</div>
-          <div class="qc-desc">构建知识库，支持 PDF/Word/Excel</div>
+          <div class="qc-title">标书生成</div>
+          <div class="qc-desc">AI 自动编写专业投标文件</div>
         </div>
         <div class="qc-arrow">→</div>
       </router-link>
 
-      <router-link to="/chat" class="quick-card qc-green">
+      <router-link to="/kb" class="quick-card qc-green">
+        <div class="qc-icon">📄</div>
+        <div class="qc-body">
+          <div class="qc-title">知识库</div>
+          <div class="qc-desc">构建企业文档知识库，支持 PDF/Word/Excel</div>
+        </div>
+        <div class="qc-arrow">→</div>
+      </router-link>
+
+      <router-link to="/chat" class="quick-card qc-orange">
         <div class="qc-icon">💬</div>
         <div class="qc-body">
           <div class="qc-title">RAG 问答</div>
@@ -60,18 +110,9 @@
         </div>
         <div class="qc-arrow">→</div>
       </router-link>
-
-      <router-link to="/bid" class="quick-card qc-orange">
-        <div class="qc-icon">📋</div>
-        <div class="qc-body">
-          <div class="qc-title">生成标书</div>
-          <div class="qc-desc">AI 自动编写专业投标文件</div>
-        </div>
-        <div class="qc-arrow">→</div>
-      </router-link>
     </div>
 
-    <!-- Trust Badges -->
+    <!-- ── Trust Badges ── -->
     <div class="trust-row">
       <div class="trust-item">✓ 数据本地存储</div>
       <div class="trust-item">✓ 开箱即用</div>
@@ -88,6 +129,51 @@ import api from "../api"
 
 const stats = ref({ document_count: 0, chunk_count: 0, user_count: 0 })
 
+const features = [
+  {
+    icon: "📂",
+    title: "招标文件解析",
+    desc: "智能解析招标公告，提取关键信息，自动识别技术要求与评分标准",
+    path: "/bid-analyze"
+  },
+  {
+    icon: "📋",
+    title: "标书智能生成",
+    desc: "基于产品资料与招标要求，AI 一键生成专业投标文件，省时省力",
+    path: "/bid"
+  },
+  {
+    icon: "🧠",
+    title: "企业 RAG 知识库",
+    desc: "私有化部署向量知识库，支持 PDF/Word/Excel 多格式文档检索",
+    path: "/kb"
+  },
+  {
+    icon: "🕒",
+    title: "历史版本管理",
+    desc: "标书历史版本完整保留，随时回溯对比，一键下载历史版本",
+    path: "/bid"
+  }
+]
+
+const advantages = [
+  {
+    icon: "🔒",
+    title: "本地部署安全",
+    desc: "数据不出工厂，满足企业数据安全合规要求"
+  },
+  {
+    icon: "⚡",
+    title: "AI 提升效率",
+    desc: "标书编写效率提升 10 倍，减少重复劳动"
+  },
+  {
+    icon: "🎯",
+    title: "操作简单",
+    desc: "上传资料 → 选择模板 → 生成标书，三步完成"
+  }
+]
+
 onMounted(async () => {
   try {
     const resp = await api.get("/api/admin/stats")
@@ -99,7 +185,7 @@ onMounted(async () => {
 <style scoped>
 .dashboard-page {
   padding: 32px 36px 64px;
-  max-width: 960px;
+  max-width: 1024px;
 }
 
 /* ── Hero Banner ── */
@@ -108,10 +194,11 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  background: var(--color-primary);
+  background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
   border-radius: var(--radius-xl);
-  padding: 36px 40px;
+  padding: 40px 44px;
   margin-bottom: 24px;
+  box-shadow: 0 8px 32px rgba(59, 130, 246, 0.25);
 }
 
 .hero-brand {
@@ -139,7 +226,58 @@ onMounted(async () => {
 
 .hero-desc {
   font-size: 14px;
-  color: rgba(255,255,255,0.7);
+  color: rgba(255,255,255,0.75);
+  margin-bottom: 24px;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  color: #3B82F6;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: all 0.15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+.btn-primary:hover {
+  background: #F0F9FF;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.btn-arrow {
+  font-size: 16px;
+  transition: transform 0.15s;
+}
+.btn-primary:hover .btn-arrow {
+  transform: translateX(3px);
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  color: rgba(255,255,255,0.85);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  border: 1px solid rgba(255,255,255,0.3);
+  transition: all 0.15s;
+}
+.btn-ghost:hover {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
 }
 
 .security-badge {
@@ -149,10 +287,10 @@ onMounted(async () => {
   background: rgba(255,255,255,0.15);
   border: 1px solid rgba(255,255,255,0.25);
   border-radius: var(--radius-lg);
-  padding: 14px 18px;
+  padding: 16px 20px;
   white-space: nowrap;
 }
-.sb-icon { font-size: 22px; }
+.sb-icon { font-size: 24px; }
 .sb-title {
   font-size: 13px;
   font-weight: 600;
@@ -174,12 +312,9 @@ onMounted(async () => {
   border: 1px solid var(--color-hairline);
   border-radius: var(--radius-lg);
   padding: 20px 40px;
-  margin-bottom: 32px;
+  margin-bottom: 36px;
 }
-.stat-item {
-  flex: 1;
-  text-align: center;
-}
+.stat-item { flex: 1; text-align: center; }
 .stat-num {
   font-size: 28px;
   font-weight: 700;
@@ -199,13 +334,103 @@ onMounted(async () => {
   background: var(--color-hairline);
 }
 
-/* ── Section Title ── */
+/* ── Section Header ── */
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 16px;
+}
 .section-title {
-  font-size: 15px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-ink);
+  letter-spacing: -0.3px;
+}
+.section-sub {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+/* ── Core Features Grid ── */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 36px;
+}
+
+.feature-card {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.15s;
+}
+.feature-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.1);
+  transform: translateY(-2px);
+}
+
+.fc-icon { font-size: 28px; margin-bottom: 4px; }
+.fc-title {
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.2px;
-  margin-bottom: 14px;
+}
+.fc-desc {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  line-height: 1.5;
+  flex: 1;
+}
+.fc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-primary);
+  text-decoration: none;
+  margin-top: 4px;
+  transition: gap 0.15s;
+}
+.fc-link:hover { gap: 8px; }
+.fc-link span { font-size: 14px; }
+
+/* ── Advantages Row ── */
+.advantages-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 36px;
+}
+
+.adv-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+}
+.adv-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.adv-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+  margin-bottom: 4px;
+}
+.adv-desc {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  line-height: 1.5;
 }
 
 /* ── Quick Grid ── */
@@ -273,6 +498,15 @@ onMounted(async () => {
 }
 
 /* ── Responsive ── */
+@media (max-width: 1024px) {
+  .features-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .advantages-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 768px) {
   .dashboard-page {
     padding: 20px 16px 48px;
@@ -280,14 +514,24 @@ onMounted(async () => {
   .hero-banner {
     flex-direction: column;
     align-items: flex-start;
-    padding: 24px;
+    padding: 28px 24px;
   }
-  .hero-title { font-size: 22px; }
+  .hero-title { font-size: 24px; }
+  .hero-actions { flex-wrap: wrap; }
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+  .advantages-row {
+    grid-template-columns: 1fr;
+  }
   .quick-grid {
     grid-template-columns: 1fr;
   }
   .stats-row {
     padding: 16px 24px;
+  }
+  .security-badge {
+    display: none;
   }
 }
 </style>

@@ -35,12 +35,17 @@
     <!-- Right Login Panel -->
     <div class="login-panel">
       <div class="login-card">
-        <div class="login-brand-mobile">
-          <span class="brand-icon">⚡</span>
-          <span class="brand-name">ClawOS</span>
+        <!-- Logo -->
+        <div class="login-logo">
+          <div class="logo-icon">⚡</div>
+          <div class="logo-text">
+            <div class="logo-name">ClawOS X</div>
+            <div class="logo-sub">智能投标标书系统</div>
+          </div>
         </div>
-        <p class="login-title">登录系统</p>
-        <p class="login-hint">输入账号密码进入控制台</p>
+
+        <p class="login-title">欢迎回来</p>
+        <p class="login-hint">登录以进入控制台</p>
 
         <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
           <el-form-item prop="username">
@@ -123,15 +128,43 @@ async function handleLogin() {
 
 /* ── Hero Panel ── */
 .hero-panel {
-  background: var(--color-primary);
+  background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 48px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-panel::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -30%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.hero-panel::after {
+  content: '';
+  position: absolute;
+  bottom: -40%;
+  left: -20%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
 }
 
 .hero-inner {
   max-width: 400px;
+  position: relative;
+  z-index: 1;
 }
 
 .hero-brand {
@@ -206,17 +239,37 @@ async function handleLogin() {
 
 .login-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 400px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.login-brand-mobile {
-  display: none;
+/* ── Logo ── */
+.login-logo {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   margin-bottom: 8px;
+}
+.logo-icon {
+  font-size: 28px;
+}
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.logo-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-ink);
+  letter-spacing: -0.4px;
+}
+.logo-sub {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  letter-spacing: 0.3px;
 }
 
 .login-title {
@@ -285,7 +338,7 @@ async function handleLogin() {
     align-items: flex-start;
   }
 
-  .login-brand-mobile {
+  .login-logo {
     display: flex;
   }
 }

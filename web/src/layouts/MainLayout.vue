@@ -5,7 +5,7 @@
     <header class="topbar">
       <div class="topbar-brand">
         <span class="brand-icon">⚡</span>
-        <span class="brand-name">ClawOS</span>
+        <span class="brand-name">ClawOS X</span>
       </div>
       <button class="hamburger" @click="mobileMenuOpen = !mobileMenuOpen" :class="{ active: mobileMenuOpen }">
         <span></span><span></span><span></span>
@@ -17,7 +17,7 @@
       <div class="sidebar-inner">
         <div class="sidebar-brand">
           <span class="brand-icon">⚡</span>
-          <span class="brand-name">ClawOS</span>
+          <span class="brand-name">ClawOS X</span>
         </div>
 
         <nav class="sidebar-nav">
@@ -36,6 +36,10 @@
         </nav>
 
         <div class="sidebar-footer">
+          <a class="help-link" href="/docs/使用说明.md" target="_blank" title="查看使用说明">
+            <el-icon><component :is="QuestionFilled" /></el-icon>
+            <span>使用说明</span>
+          </a>
           <div class="deploy-badge">
             <span class="deploy-dot"></span>
             本地部署
@@ -65,7 +69,7 @@ import { ref, computed } from "vue"
 import { useRouter, useRoute } from "vue-router"
 import { useAuthStore } from "../stores/auth"
 import {
-  Odometer, Document, ChatDotRound, Files, DataBoard, Setting, User, SwitchButton
+  Odometer, Document, ChatDotRound, Files, DataBoard, Setting, User, SwitchButton, QuestionFilled
 } from "@element-plus/icons-vue"
 
 const router = useRouter()
@@ -221,6 +225,22 @@ function handleLogout() {
   border-radius: 50%;
   background: var(--color-brand-secure);
   opacity: 0.6;
+}
+
+.help-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  text-decoration: none;
+  transition: all 0.12s;
+}
+.help-link:hover {
+  background: var(--color-surface-2);
+  color: var(--color-primary);
 }
 
 .user-row {

@@ -65,6 +65,11 @@ WEB_DIST = _get_resource_path("web/dist")
 if WEB_DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="assets")
 
+# 使用说明文档（Markdown）
+DOCS_DIR = _get_resource_path("docs")
+if DOCS_DIR.exists():
+    app.mount("/docs", StaticFiles(directory=str(DOCS_DIR)), name="docs")
+
 
 @app.get("/")
 async def root():

@@ -158,14 +158,24 @@
                     v-for="(item, ii) in section.items"
                     :key="ii"
                     class="scoring-item"
-                    :class="{ 'disqualify-item': item.disqualify_if_fail }"
+                    :class="{ 
+                      'disqualify-item': item.disqualify_if_fail,
+                      'formula-item': item.type === 'formula',
+                      'expert-item': item.type === 'expert'
+                    }"
                   >
                     <div class="scoring-item-row">
-                      <span class="scoring-item-name">{{ item.name }}</span>
+                      <div class="scoring-item-left">
+                        <span v-if="item.disqualify_if_fail" class="scoring-disqualify-icon">🔴</span>
+                        <span class="scoring-item-name">{{ item.name }}</span>
+                      </div>
                       <span class="scoring-item-score">{{ item.score }}/{{ item.max_score || item.score }}分</span>
                     </div>
                     <div class="scoring-item-meta">
-                      <span class="scoring-item-type">{{ scoringTypeLabel(item.type) }}</span>
+                      <span class="scoring-item-type" :class="item.type">
+                        <span class="type-icon">{{ scoringTypeIcon(item.type) }}</span>
+                        {{ scoringTypeLabel(item.type) }}
+                      </span>
                       <span v-if="item.disqualify_if_fail" class="scoring-disqualify-tag">不满足则废标</span>
                       <span v-if="item.formula" class="scoring-formula">{{ item.formula }}</span>
                     </div>
@@ -225,7 +235,7 @@
             </div>
           </div>
           <div class="empty-materials" v-else>
-            <div class="empty-icon">📄</div>
+            <div class="empty-icon">📂</div>
             <div class="empty-text">知识库暂无文档</div>
             <div class="empty-hint">上传施工方案、标准合同等素材，系统将自动关联</div>
           </div>
@@ -289,15 +299,16 @@
           <!-- 策略选择 -->
           <div class="strategy-selector">
             <div class="strategy-label">策略选择</div>
-            <div class="strategy-options">
+            <div class="strategy-tabs">
               <label
                 v-for="opt in strategyOptions"
                 :key="opt.value"
-                class="strategy-option"
+                class="strategy-tab"
                 :class="{ active: selectedStrategy === opt.value }"
               >
                 <input type="radio" :value="opt.value" v-model="selectedStrategy" style="display:none" />
-                <div class="strategy-option-inner">
+                <div class="strategy-tab-inner">
+                  <span class="strategy-icon">{{ opt.icon }}</span>
                   <span class="strategy-name">{{ opt.label }}</span>
                   <span class="strategy-desc">{{ opt.desc }}</span>
                 </div>
@@ -318,6 +329,17 @@
 
           <!-- Generating State -->
           <div v-if="generating" class="generating-panel">
+            <!-- Step Progress Indicator -->
+            <div class="gen-steps">
+              <div v-for="(step, si) in genSteps" :key="si" class="gen-step" :class="{ active: genCurrentStep >= si, done: genCurrentStep > si }">
+                <div class="gen-step-icon">
+                  <span v-if="genCurrentStep > si">✓</span>
+                  <span v-else>{{ step.i }}</span>
+                </div>
+                <div class="gen-step-label">{{ step.label }}</div>
+              </div>
+            </div>
+
             <div class="gen-progress-header">
               <span class="gen-stage">{{ progressMessage }}</span>
               <span class="gen-pct">{{ progress }}%</span>
@@ -331,17 +353,27 @@
                 v-for="(state, chIdx) in chapterStates"
                 :key="chIdx"
                 class="chapter-progress-item"
+                :class="state.status"
               >
+                <div class="chapter-status-icon">
+                  <span v-if="state.status === 'completed'" class="status-check">✓</span>
+                  <span v-else-if="state.status === 'generating'" class="status-spinner"></span>
+                  <span v-else class="status-pending">○</span>
+                </div>
                 <div class="chapter-name">{{ state.name }}</div>
+                <div class="chapter-status-tag" :class="state.status">
+                  {{ state.status === 'pending' ? '待生成' : state.status === 'generating' ? '生成中' : '已完成' }}
+                </div>
                 <div class="chapter-bar-wrap">
                   <el-progress
                     :percentage="state.progress"
                     :status="state.status === 'completed' ? 'success' : undefined"
-                    :stroke-width="8"
-                    :show-text="true"
-                    :format="p => p + '%'"
+                    :stroke-width="6"
+                    :show-text="false"
+                    :class="{ 'progress-striped': state.status === 'generating' }"
                   />
                 </div>
+                <div class="chapter-pct">{{ state.progress }}%</div>
               </div>
             </div>
             <!-- Streaming Preview (Markdown rendered) -->
@@ -354,8 +386,8 @@
           <!-- Done: Download -->
           <div v-if="generatedFile && !generating" class="done-panel">
             <div class="done-badge">
-              <el-icon><component :is="Check" /></el-icon>
-              标书已生成
+              <span class="done-icon">✅</span>
+              标书生成成功
             </div>
             <a :href="generatedFile.url" target="_blank" class="download-btn">
               <el-icon><component :is="Download" /></el-icon>
@@ -590,14 +622,24 @@ const openScoringSections = ref(new Set()) // 展开的评分项section索引
 
 // 投标策略选项
 const strategyOptions = [
-  { label: "技术优先型", value: "技术优先型", desc: "技术方案详细、质量最高、价格适中" },
-  { label: "成本控制型", value: "成本控制型", desc: "价格最低方案，利润优先" },
-  { label: "综合均衡型", value: "综合均衡型", desc: "技术和价格平衡，性价比最优" },
+  { label: "技术优先型", value: "技术优先型", icon: "🔧", desc: "技术方案详细、质量最高、价格适中" },
+  { label: "成本控制型", value: "成本控制型", icon: "💰", desc: "价格最低方案，利润优先" },
+  { label: "综合均衡型", value: "综合均衡型", icon: "⚖️", desc: "技术和价格平衡，性价比最优" },
 ]
 const selectedStrategy = ref("综合均衡型") // 默认选中
 
 // Chapter progress state: Map<chapter_index, {name, status, progress}>
 const chapterStates = ref({})
+
+// Generation step tracking
+const genSteps = [
+  { i: '1', label: '解析' },
+  { i: '2', label: '检测' },
+  { i: '3', label: '生成' },
+  { i: '4', label: '质检' },
+  { i: '5', label: '完成' },
+]
+const genCurrentStep = ref(0)
 
 // 历史版本
 const versionList = ref([])
@@ -618,6 +660,11 @@ function toggleScoringSection(idx) {
 function scoringTypeLabel(type) {
   const map = { expert: '专家打分', formula: '公式计算', qualified: '满足即得分' }
   return map[type] || type || '未知'
+}
+
+function scoringTypeIcon(type) {
+  const map = { expert: '👤', formula: '🔢', qualified: '✓' }
+  return map[type] || '📋'
 }
 
 // 素材列表：解析后显示推荐素材（带相关度），未解析时显示知识库全部文档（排除生成的 bid 文件）
@@ -916,6 +963,7 @@ async function doGenerate() {
       progress: 0,
     }
   }
+  genCurrentStep.value = 1
 
   try {
     const token = localStorage.getItem("token") || ""
@@ -954,9 +1002,17 @@ async function doGenerate() {
           if (data.delta) {
             streamingContent.value += data.delta
             renderedContent.value = marked.parse(streamingContent.value)
+            // Trigger fade-in animation on new content
+            const preview = document.querySelector('.streaming-html')
+            if (preview) {
+              preview.classList.remove('content-update')
+              void preview.offsetWidth // reflow
+              preview.classList.add('content-update')
+            }
           }
           // Chapter-level events
           if (data.stage === "chapter_start") {
+            genCurrentStep.value = 3 // 生成
             const idx = data.chapter_index
             if (chapterStates.value[idx] !== undefined) {
               chapterStates.value[idx] = { ...chapterStates.value[idx], status: "generating", progress: 0 }
@@ -969,6 +1025,7 @@ async function doGenerate() {
             }
           }
           if (data.stage === "chapter_done") {
+            genCurrentStep.value = 4 // 质检
             const idx = data.chapter_index
             if (chapterStates.value[idx] !== undefined) {
               chapterStates.value[idx] = { ...chapterStates.value[idx], status: "completed", progress: 100 }
@@ -983,8 +1040,10 @@ async function doGenerate() {
           }
           if (data.stage === "violation_warn") {
             violationResult.value = data.violation_result
+            genCurrentStep.value = 2 // 检测
           }
           if (data.stage === "done") {
+            genCurrentStep.value = 5 // 完成
             generatedFile.value = {
               name: data.filename,
               url: `${apiBase()}/api/bid/download/${data.filename}`,
@@ -1231,15 +1290,17 @@ async function doGenerate() {
 }
 .scoring-method {
   font-size: 12px;
-  background: var(--color-primary);
+  background: linear-gradient(135deg, var(--color-primary), #818cf8);
   color: #fff;
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(94, 105, 209, 0.3);
 }
 .scoring-total {
   font-size: 12px;
   color: var(--color-ink-subtle);
+  font-weight: 500;
 }
 .scoring-sections {
   display: flex;
@@ -1255,7 +1316,7 @@ async function doGenerate() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: var(--color-surface-2);
   cursor: pointer;
   user-select: none;
@@ -1264,12 +1325,13 @@ async function doGenerate() {
 .scoring-section-name {
   flex: 1;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--color-ink);
 }
 .scoring-section-weight {
   font-size: 12px;
   color: var(--color-ink-subtle);
+  font-weight: 500;
 }
 .scoring-arrow {
   font-size: 12px;
@@ -1285,19 +1347,37 @@ async function doGenerate() {
   background: #fff;
 }
 .scoring-item {
-  padding: 7px 10px;
-  border-radius: 5px;
+  padding: 8px 12px;
+  border-radius: 6px;
   background: var(--color-surface-2);
+  border-left: 3px solid transparent;
 }
 .scoring-item.disqualify-item {
-  background: rgba(245, 108, 108, 0.08);
-  border-left: 3px solid var(--color-semantic-error);
+  background: rgba(245, 108, 108, 0.06);
+  border-left-color: var(--color-semantic-error);
+}
+.scoring-item.formula-item {
+  background: rgba(245, 158, 11, 0.06);
+  border-left-color: #f59e0b;
+}
+.scoring-item.expert-item {
+  background: rgba(59, 130, 246, 0.06);
+  border-left-color: var(--color-primary);
 }
 .scoring-item-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
+}
+.scoring-item-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.scoring-disqualify-icon {
+  font-size: 12px;
+  flex-shrink: 0;
 }
 .scoring-item-name {
   font-size: 12px;
@@ -1317,18 +1397,35 @@ async function doGenerate() {
 }
 .scoring-item-type {
   font-size: 10px;
-  padding: 1px 5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 500;
+}
+.scoring-item-type.expert {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--color-primary);
+}
+.scoring-item-type.formula {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+.scoring-item-type.qualified {
   background: var(--color-hairline);
-  border-radius: 3px;
   color: var(--color-ink-muted);
+}
+.type-icon {
+  font-size: 11px;
 }
 .scoring-disqualify-tag {
   font-size: 10px;
-  padding: 1px 5px;
+  padding: 2px 7px;
   background: rgba(245, 108, 108, 0.12);
   color: var(--color-semantic-error);
-  border-radius: 3px;
-  font-weight: 500;
+  border-radius: 4px;
+  font-weight: 600;
 }
 .scoring-formula {
   font-size: 10px;
@@ -1564,43 +1661,55 @@ async function doGenerate() {
   text-transform: uppercase;
   color: var(--color-ink-subtle);
 }
-.strategy-options {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.strategy-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
 }
-.strategy-option {
+.strategy-tab {
   cursor: pointer;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-  transition: all 0.15s;
+  border: 2px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: 12px 10px;
+  transition: all 0.2s;
   background: var(--color-surface-2);
+  text-align: center;
 }
-.strategy-option:hover {
+.strategy-tab:hover {
   border-color: var(--color-primary);
   background: rgba(94, 105, 209, 0.04);
+  transform: translateY(-1px);
 }
-.strategy-option.active {
+.strategy-tab.active {
   border-color: var(--color-primary);
   background: rgba(94, 105, 209, 0.08);
+  box-shadow: 0 0 0 3px rgba(94, 105, 209, 0.12);
 }
-.strategy-option-inner {
+.strategy-tab-inner {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
+}
+.strategy-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+.strategy-tab.active .strategy-icon {
+  transform: scale(1.1);
 }
 .strategy-name {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--color-ink);
 }
-.strategy-option.active .strategy-name {
+.strategy-tab.active .strategy-name {
   color: var(--color-primary);
 }
 .strategy-desc {
   font-size: 11px;
   color: var(--color-ink-tertiary);
+  line-height: 1.3;
 }
 
 .generate-btn {
@@ -1614,7 +1723,79 @@ async function doGenerate() {
 .generating-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
+  animation: fadeIn 0.3s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Step Indicator ── */
+.gen-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 4px;
+}
+.gen-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  position: relative;
+}
+.gen-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: calc(100% - 52px);
+  height: 2px;
+  background: var(--color-hairline);
+}
+.gen-step.done:not(:last-child)::after {
+  background: var(--color-primary);
+}
+.gen-step-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-surface-2);
+  border: 2px solid var(--color-hairline-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-ink-tertiary);
+  flex-shrink: 0;
+  z-index: 1;
+  transition: all 0.3s;
+}
+.gen-step.active .gen-step-icon {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(94, 105, 209, 0.2);
+}
+.gen-step.done .gen-step-icon {
+  background: var(--color-semantic-success);
+  border-color: var(--color-semantic-success);
+  color: #fff;
+}
+.gen-step-label {
+  font-size: 11px;
+  color: var(--color-ink-tertiary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.gen-step.active .gen-step-label {
+  color: var(--color-primary);
+}
+.gen-step.done .gen-step-label {
+  color: var(--color-semantic-success);
 }
 .gen-progress-header {
   display: flex;
@@ -1654,20 +1835,106 @@ async function doGenerate() {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+}
+.chapter-progress-item.generating {
+  background: rgba(59, 130, 246, 0.04);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+.chapter-progress-item.completed {
+  background: rgba(34, 197, 94, 0.04);
+  border-color: rgba(34, 197, 94, 0.2);
+}
+.chapter-status-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.status-check {
+  color: var(--color-semantic-success);
+  font-weight: 700;
+  font-size: 14px;
+}
+.status-pending {
+  color: var(--color-ink-tertiary);
+  font-size: 14px;
+}
+.status-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 .chapter-name {
   font-size: 12px;
-  color: var(--color-ink-subtle);
+  color: var(--color-ink);
   min-width: 80px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
+}
+.chapter-status-tag {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.chapter-status-tag.pending {
+  background: var(--color-hairline);
+  color: var(--color-ink-tertiary);
+}
+.chapter-status-tag.generating {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--color-primary);
+}
+.chapter-status-tag.completed {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
 }
 .chapter-bar-wrap {
   flex: 1;
 }
 .chapter-bar-wrap .el-progress {
   --el-progress-text-color: var(--color-ink-subtle);
+}
+/* Striped animation for generating */
+.progress-striped :deep(.el-progress-bar__outer) {
+  background-image: linear-gradient(
+    45deg,
+    rgba(59, 130, 246, 0.15) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(59, 130, 246, 0.15) 50%,
+    rgba(59, 130, 246, 0.15) 75%,
+    transparent 75%
+  );
+  background-size: 16px 16px;
+  animation: stripes 0.8s linear infinite;
+}
+@keyframes stripes {
+  0% { background-position: 0 0; }
+  100% { background-position: 16px 0; }
+}
+.chapter-pct {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  min-width: 32px;
+  text-align: right;
 }
 
 .streaming-preview {
@@ -1703,14 +1970,27 @@ async function doGenerate() {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 16px;
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: var(--radius-lg);
+  animation: successPop 0.4s ease-out;
+}
+@keyframes successPop {
+  0% { opacity: 0; transform: scale(0.95); }
+  70% { transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
 }
 .done-badge {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 500;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-semantic-success);
+}
+.done-icon {
+  font-size: 20px;
 }
 .download-btn {
   display: flex;
@@ -1722,14 +2002,16 @@ async function doGenerate() {
   background: var(--color-surface-2);
   border: 1px solid var(--color-hairline-strong);
   border-radius: var(--radius-md);
-  padding: 8px 14px;
+  padding: 10px 18px;
   text-decoration: none;
   transition: all 0.15s;
 }
 .download-btn:hover {
   background: var(--color-surface-3);
-  border-color: var(--color-hairline-tertiary);
-  color: var(--color-ink);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
 /* ── Review Panel ── */
@@ -1939,6 +2221,14 @@ async function doGenerate() {
   color: var(--color-ink);
   max-height: 400px;
   overflow-y: auto;
+  animation: contentFadeIn 0.4s ease-out;
+}
+@keyframes contentFadeIn {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+.streaming-html.content-update {
+  animation: contentFadeIn 0.3s ease-out;
 }
 .streaming-html :deep(h1) { font-size: 16px; font-weight: 600; margin: 0 0 8px; color: var(--color-ink); }
 .streaming-html :deep(h2) { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--color-ink); }

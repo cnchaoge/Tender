@@ -92,7 +92,75 @@ a {
   background: var(--color-ink-tertiary);
 }
 
-/* ─── Linear Surface Card ─── */
+/* ─── Global Selection Color ─── */
+::selection {
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--color-ink);
+}
+
+/* ─── Global Transitions ─── */
+* {
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+/* ─── Scrollbar (already defined, reinforcing) ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface-1);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-hairline-strong);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-tertiary);
+}
+
+/* ─── Scrollbar (already defined, reinforcing) ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface-1);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-hairline-strong);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-tertiary);
+}
+
+/* ─── Smooth scroll ─── */
+html {
+  scroll-behavior: smooth;
+}
+
+
+/* ─── Card Hover Effect ─── */
+.linear-card,
+.kb-table-wrap,
+.materials-card,
+.generate-card,
+.versions-card {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.linear-card:hover,
+.kb-table-wrap:hover,
+.materials-card:hover,
+.generate-card:hover,
+.versions-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+/* ─── Table Row Hover Global ─── */
+.el-table__row:hover > td {
+  background: var(--color-surface-2) !important;
+}
 .linear-card {
   background: var(--color-surface-1);
   border: 1px solid var(--color-hairline);
