@@ -65,10 +65,16 @@ WEB_DIST = _get_resource_path("web/dist")
 if WEB_DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="assets")
 
-# 使用说明文档（Markdown）
+# 使用说明文档（Markdown + Docsify）
 DOCS_DIR = _get_resource_path("docs")
 if DOCS_DIR.exists():
-    app.mount("/docs", StaticFiles(directory=str(DOCS_DIR)), name="docs")
+    app.mount("/docs", StaticFiles(directory=str(DOCS_DIR), html=True), name="docs")
+
+@app.get("/docs")
+def docs_index():
+    """Redirect /docs to /docs/ for docsify"""
+    from starlette.responses import RedirectResponse
+    return RedirectResponse("/docs/", status_code=302)
 
 
 @app.get("/")
