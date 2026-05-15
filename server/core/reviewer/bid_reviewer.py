@@ -113,3 +113,96 @@ def review_bid(bid_content: str, parse_result: dict) -> dict:
         "suggestions": [],
         "coverage_check": {"requirements_covered": [], "requirements_missing": []}
     }
+
+
+def _check_format_compliance(bid_content: str, parse_result: dict) -> dict:
+    """
+    检测标书格式规范
+
+    检测项：
+    1. 目录是否存在
+    2. 页眉页脚（投标方名称、项目名称）
+    3. 签字盖章位置标记
+    4. 页码格式
+    5. 技术标/商务标章节完整性
+
+    Returns:
+        {
+            "passed": bool,
+            "warnings": [{"item": str, "status": str, "detail": str}],
+            "score": int,  # 格式评分 0-100
+        }
+    """
+    warnings = []
+    score = 100
+
+    text_lower = bid_content.lower()
+
+    # ── 1. 目录检测 ──────────────────────────────────────────────
+    has_toc = bool(
+        re.search(r"^#{1,3}\s*目\s*录", bid_content, re.MULTILINE) or
+        re.search(r"^#{1,3}\s*table\s*of\s*contents", bid_content, re.IGNORECASE | re.MULTILINE) or
+        re.search(r"^目\s*录", bid_content, re.MULTILINE)
+    )
+    if has_toc:
+        warnings.append({"item": "目录", "status": "pass", "detail": "标书包含目录章节"})
+    else:
+        warnings.append({"item": "目录", "status": "warning", "detail": "未找到目录章节，建议自动生成目录"})
+        score -= 15
+
+    # ── 2. 签字盖章位置检测 ────────────────────────────────────
+    has_seal = bool(
+        re.search(r"（盖章）", bid_content) or
+        re.search(r"（签字）", bid_content) or
+        re.search(r"盖章处", bid_content) or
+        re.search(r"签字处", bid_content)
+    )
+    if has_seal:
+        warnings.append({"item": "签字盖章", "status": "pass", "detail": "检测到签字盖章位置标记"})
+    else:
+        warnings.append({"item": "签字盖章", "status": "warning", "detail": "未检测到签字盖章位置标记，生成后请手动补充"})
+        score -= 20
+
+    # ── 3. 页码格式检测 ────────────────────────────────────────
+    has_page_number = bool(
+        re.search(r"第\d+页共\d+页", bid_content) or
+        re.search(r"页\s*码", bid_content) or
+        re.search(r"page\s*\d+", bid_content, re.IGNORECASE)
+    )
+    if has_page_number:
+        warnings.append({"item": "页码", "status": "pass", "detail": "检测到页码相关描述"})
+    else:
+        warnings.append({"item": "页码", "status": "warning", "detail": "未检测到页码格式，建议添加「第X页共Y页」"})
+        score -= 10
+
+    # ── 4. 章节完整性（技术标/商务标）─────────────────────────
+    required_sections = {
+        "技术标": bool(re.search(r"^#{1,3}\s*技术标", bid_content, re.MULTILINE)),
+        "商务标": bool(re.search(r"^#{1,3}\s*商务标", bid_content, re.MULTILINE)),
+    }
+    for section, found in required_sections.items():
+        if found:
+            warnings.append({"item": section, "status": "pass", "detail": f"包含{section}章节"})
+        else:
+            warnings.append({"item": section, "status": "warning", "detail": f"未找到{section}章节"})
+            score -= 15
+
+    # ── 5. 投标方/项目名称页眉检测 ────────────────────────────
+    project_name = parse_result.get("project_name", "")
+    has_header = False
+    if project_name and project_name not in ("未识别到项目名称", "解析失败"):
+        has_header = project_name in bid_content
+    if has_header:
+        warnings.append({"item": "页眉页脚", "status": "pass", "detail": "包含项目名称相关内容"})
+    else:
+        warnings.append({"item": "页眉页脚", "status": "warning", "detail": "建议在页眉页脚包含投标方名称和项目名称"})
+        score -= 10
+
+    score = max(0, score)
+    passed = score >= 70
+
+    return {
+        "passed": passed,
+        "warnings": warnings,
+        "score": score,
+    }

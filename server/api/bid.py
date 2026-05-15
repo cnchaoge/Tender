@@ -129,7 +129,7 @@ from server.config import GENERATED_DIR, get_settings
 from server.db.sqlite import get_db
 from server.core.retriever.retriever import retrieve
 from server.core.generator.llm import get_generator
-from server.core.reviewer import review_bid
+from server.core.reviewer import review_bid, _check_format_compliance
 from server.tools.violation_checker import get_violation_checker
 from server.tools.plagiarism_checker import get_plagiarism_checker
 from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, Resp
@@ -686,7 +686,6 @@ async def generate_bid_stream(req: BidGenerateReq):
             yield _sse_event({"stage": "generating", "progress": 30, "message": "生成中...", "delta": delta})
 
         content = "".join(content_parts)
-        content = "".join(content_parts)
         
         # ── 阶段2：废标项检测（基于生成的标书正文）───────────────────────
         yield _sse_event({"stage": "violation_check", "progress": 65, "message": "废标项合规性检测..."})
@@ -720,6 +719,10 @@ async def generate_bid_stream(req: BidGenerateReq):
             review = review_bid(content, req.parse_result)
             yield _sse_event({"stage": "reviewing", "progress": 90, "message": "重新审核中..."})
 
+        # ── 阶段3.5：格式规范检测 ────────────────────────────────────
+        yield _sse_event({"stage": "format_check", "progress": 86, "message": "格式规范检测..."})
+        format_result = _check_format_compliance(content, req.parse_result)
+
         # ── 阶段4：标书查重 ──────────────────────────────────────────
         yield _sse_event({"stage": "plagiarism_check", "progress": 88, "message": "标书查重检测..."})
         plagiarism_checker = get_plagiarism_checker()
@@ -745,6 +748,11 @@ async def generate_bid_stream(req: BidGenerateReq):
                 "passed": review["passed"],
                 "score": review.get("score", 0),
                 "issues": review.get("issues", []),
+            },
+            "format_result": {
+                "passed": format_result["passed"],
+                "score": format_result.get("score", 0),
+                "warnings": format_result.get("warnings", []),
             },
             "violation_result": violation_result,
             "plagiarism_result": {

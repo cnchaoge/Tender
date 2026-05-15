@@ -135,6 +135,49 @@
             </div>
           </div>
 
+          <!-- Scoring Standards -->
+          <div class="field-group" v-if="parseResult.scoring && parseResult.scoring.sections?.length">
+            <div class="field-label">评分标准</div>
+            <div class="scoring-summary">
+              <span class="scoring-method">{{ parseResult.scoring.method || '综合评分法' }}</span>
+              <span class="scoring-total">总分 {{ parseResult.scoring.total_score || 100 }}</span>
+            </div>
+            <div class="scoring-sections">
+              <div
+                v-for="(section, si) in parseResult.scoring.sections"
+                :key="si"
+                class="scoring-section"
+              >
+                <div class="scoring-section-header" @click="toggleScoringSection(si)">
+                  <span class="scoring-section-name">{{ section.name }}</span>
+                  <span class="scoring-section-weight">{{ section.weight }}%</span>
+                  <el-icon class="scoring-arrow" :class="{ open: openScoringSections.has(si) }"><component :is="ArrowRight" /></el-icon>
+                </div>
+                <div v-if="openScoringSections.has(si)" class="scoring-items">
+                  <div
+                    v-for="(item, ii) in section.items"
+                    :key="ii"
+                    class="scoring-item"
+                    :class="{ 'disqualify-item': item.disqualify_if_fail }"
+                  >
+                    <div class="scoring-item-row">
+                      <span class="scoring-item-name">{{ item.name }}</span>
+                      <span class="scoring-item-score">{{ item.score }}/{{ item.max_score || item.score }}分</span>
+                    </div>
+                    <div class="scoring-item-meta">
+                      <span class="scoring-item-type">{{ scoringTypeLabel(item.type) }}</span>
+                      <span v-if="item.disqualify_if_fail" class="scoring-disqualify-tag">不满足则废标</span>
+                      <span v-if="item.formula" class="scoring-formula">{{ item.formula }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="!parseResult.scoring.sections?.length" class="scoring-empty">
+              未识别到评分标准，请手动补充
+            </div>
+          </div>
+
           <!-- Raw Text Toggle -->
           <div v-if="parseResult.raw_text" class="raw-toggle">
             <button class="raw-toggle-btn" @click="showRawText = !showRawText">
@@ -295,6 +338,29 @@
             </ul>
           </div>
 
+          <!-- Done: 格式检查结果 -->
+          <div v-if="formatResult && !generating" class="format-panel" :class="{ 'has-warnings': !formatResult.passed }">
+            <div class="format-header">
+              <span class="format-icon">📋</span>
+              <span class="format-title">格式检查</span>
+              <span class="format-score" :class="formatResult.score >= 80 ? 'pass' : formatResult.score >= 60 ? 'mid' : 'fail'">
+                {{ formatResult.score }}分
+              </span>
+            </div>
+            <ul class="format-warnings">
+              <li
+                v-for="(w, wi) in formatResult.warnings"
+                :key="wi"
+                class="format-item"
+                :class="w.status"
+              >
+                <span class="format-item-icon">{{ w.status === 'pass' ? '✅' : '⚠️' }}</span>
+                <span class="format-item-name">{{ w.item }}</span>
+                <span class="format-item-detail">{{ w.detail }}</span>
+              </li>
+            </ul>
+          </div>
+
           <!-- Done: 废标项检测结果 -->
           <div v-if="violationResult && !generating && !violationResult.passed" class="violation-panel fail">
             <div class="violation-header">
@@ -419,6 +485,18 @@ const planningChapters = ref([])    // 规划阶段章节列表
 const planDialogVisible = ref(false) // 规划阶段弹窗
 const violationResult = ref(null)   // 废标项检测结果
 const plagiarismResult = ref(null)   // 标书查重结果
+const formatResult = ref(null)       // 格式检查结果
+const openScoringSections = ref(new Set()) // 展开的评分项section索引
+
+function toggleScoringSection(idx) {
+  if (openScoringSections.value.has(idx)) openScoringSections.value.delete(idx)
+  else openScoringSections.value.add(idx)
+}
+
+function scoringTypeLabel(type) {
+  const map = { expert: '专家打分', formula: '公式计算', qualified: '满足即得分' }
+  return map[type] || type || '未知'
+}
 
 // 素材列表：解析后显示推荐素材（带相关度），未解析时显示知识库全部文档（排除生成的 bid 文件）
 const availableMaterials = computed(() => {
@@ -569,6 +647,43 @@ async function handleGenerate() {
 
 async function confirmPlanAndGenerate() {
   planDialogVisible.value = false
+  // P0-2: 前置废标检查（基于招标文件 parse_result）
+  violationResult.value = null
+  generating.value = true
+  progress.value = 5
+  progressMessage.value = "招标文件合规性检测..."
+  try {
+    const vResp = await api.post("/api/bid/violation_check", {
+      parse_result: parseResult.value,
+      raw_text: parseResult.value.raw_text || "",
+    })
+    const vResult = vResp.data
+    progress.value = 10
+    progressMessage.value = ""
+    if (!vResult.passed && vResult.summary?.disqualify_count > 0) {
+      // 有必废标项，弹警告让用户确认
+      generating.value = false
+      violationResult.value = vResult
+      const confirmed = await ElMessageBox.confirm(
+        `检测到 ${vResult.summary.disqualify_count} 项必废标风险，是否仍要强制生成？（生成后标书将存在废标风险）`,
+        "招标文件合规性警告",
+        { confirmButtonText: "强制生成", cancelButtonText: "取消", type: "warning" }
+      ).catch(() => false)
+      if (!confirmed) return
+      generating.value = true
+      progress.value = 10
+      progressMessage.value = "已确认，继续生成..."
+    } else if (!vResult.passed && vResult.summary?.high_risk_count > 0) {
+      // 有高风险项，提示但允许继续
+      violationResult.value = vResult
+      ElMessage.warning(`检测到 ${vResult.summary.high_risk_count} 项高风险项，请留意`)
+    } else if (vResult.passed) {
+      violationResult.value = { passed: true }
+    }
+  } catch {
+    // 检查失败不阻断生成
+  }
+  generating.value = false
   await doGenerate()
 }
 
@@ -635,6 +750,7 @@ async function doGenerate() {
             reviewResult.value = data.review || null
             if (data.violation_result) violationResult.value = data.violation_result
             if (data.plagiarism_result) plagiarismResult.value = data.plagiarism_result
+            if (data.format_result) formatResult.value = data.format_result
           }
         } catch {}
       }
@@ -860,6 +976,125 @@ async function doGenerate() {
 }
 .tag-add-input {
   width: 100px;
+}
+
+/* ── Scoring Section ── */
+.scoring-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.scoring-method {
+  font-size: 12px;
+  background: var(--color-primary);
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+.scoring-total {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+.scoring-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.scoring-section {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.scoring-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-surface-2);
+  cursor: pointer;
+  user-select: none;
+}
+.scoring-section-header:hover { background: var(--color-surface-3); }
+.scoring-section-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.scoring-section-weight {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+.scoring-arrow {
+  font-size: 12px;
+  color: var(--color-ink-tertiary);
+  transition: transform 0.2s;
+}
+.scoring-arrow.open { transform: rotate(90deg); }
+.scoring-items {
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #fff;
+}
+.scoring-item {
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: var(--color-surface-2);
+}
+.scoring-item.disqualify-item {
+  background: rgba(245, 108, 108, 0.08);
+  border-left: 3px solid var(--color-semantic-error);
+}
+.scoring-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.scoring-item-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.scoring-item-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+.scoring-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.scoring-item-type {
+  font-size: 10px;
+  padding: 1px 5px;
+  background: var(--color-hairline);
+  border-radius: 3px;
+  color: var(--color-ink-muted);
+}
+.scoring-disqualify-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  background: rgba(245, 108, 108, 0.12);
+  color: var(--color-semantic-error);
+  border-radius: 3px;
+  font-weight: 500;
+}
+.scoring-formula {
+  font-size: 10px;
+  color: var(--color-ink-tertiary);
+  font-family: var(--font-mono);
+}
+.scoring-empty {
+  font-size: 12px;
+  color: var(--color-semantic-warning);
+  font-style: italic;
 }
 
 .raw-toggle {
@@ -1214,6 +1449,52 @@ async function doGenerate() {
   color: var(--color-ink-subtle);
   line-height: 1.8;
 }
+
+/* ── Format Panel ── */
+.format-panel {
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin-top: 8px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+}
+.format-panel.has-warnings {
+  background: rgba(230, 162, 60, 0.05);
+  border-color: rgba(230, 162, 60, 0.25);
+}
+.format-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.format-icon { font-size: 14px; }
+.format-title { font-size: 13px; font-weight: 600; color: var(--color-ink); flex: 1; }
+.format-score { font-size: 12px; font-weight: 600; }
+.format-score.pass { color: var(--color-semantic-success); }
+.format-score.mid { color: var(--color-semantic-warning); }
+.format-score.fail { color: var(--color-semantic-error); }
+.format-warnings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.format-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+.format-item.pass { background: rgba(39, 166, 68, 0.06); }
+.format-item.warning { background: rgba(230, 162, 60, 0.08); }
+.format-item-icon { font-size: 11px; flex-shrink: 0; margin-top: 1px; }
+.format-item-name { font-weight: 500; color: var(--color-ink); flex-shrink: 0; }
+.format-item-detail { color: var(--color-ink-subtle); }
 
 /* ── Violation Panel ── */
 .violation-panel {
