@@ -36,7 +36,7 @@
         </nav>
 
         <div class="sidebar-footer">
-          <a class="help-link" href="/docs/使用说明.md" target="_blank" title="查看使用说明">
+          <a class="help-link" href="/docs/" target="_blank" title="查看使用说明">
             <el-icon><component :is="QuestionFilled" /></el-icon>
             <span>使用说明</span>
           </a>
