@@ -3,6 +3,8 @@ ClawOS X - 标书生成 API
 """
 import re
 import uuid
+import json
+import difflib
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -492,15 +494,25 @@ def plan_bid(req: BidPlanReq):
         chapters = result.get("chapters", [])
         if not chapters:
             raise ValueError("LLM 返回的章节列表为空")
-        return BidPlanResp(chapters=chapters)
+        # Add index and initial status to each chapter
+        chapters_with_status = [
+            {"index": idx, "name": ch.get("name", ""), "description": ch.get("description", ""), "status": "pending"}
+            for idx, ch in enumerate(chapters)
+        ]
+        return BidPlanResp(chapters=chapters_with_status)
     except Exception as e:
         # 失败时返回默认结构
-        return BidPlanResp(chapters=[
+        default_chapters = [
             {"name": "第一章 投标函", "description": "投标函正文，包含投标报价、工期承诺等"},
             {"name": "第二章 资格审查文件", "description": "企业资质证明、业绩材料等"},
             {"name": "第三章 技术标", "description": "施工方案、技术路线、进度计划等"},
             {"name": "第四章 商务标", "description": "报价明细表、投标保证金等"},
-        ])
+        ]
+        chapters_with_status = [
+            {"index": idx, "name": ch["name"], "description": ch["description"], "status": "pending"}
+            for idx, ch in enumerate(default_chapters)
+        ]
+        return BidPlanResp(chapters=chapters_with_status)
 
 
 @router.post("/generate", response_model=dict)
@@ -591,7 +603,17 @@ def generate_bid(req: BidGenerateReq):
 
 def _sse_event(data: dict, event: str = "message") -> bytes:
     import json
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
+
+
+def _get_strategy_guidance(strategy: str) -> str:
+    """根据策略返回对应的投标策略指导文本"""
+    strategies = {
+        "技术优先型": "【投标策略】：技术优先型\n- 侧重技术方案完整性、创新点、工程质量保障措施\n- 技术标内容要详细、专业，突出企业技术优势和施工能力\n- 适当弱化价格因素，以技术方案得分最大化为目标\n- 注重施工工艺、质量控制体系、安全文明施工等章节的深度",
+        "成本控制型": "【投标策略】：成本控制型\n- 侧重成本优化、施工方案经济性、项目利润最大化\n- 在满足招标要求的前提下，尽量压缩成本，提高利润率\n- 报价策略优先，采用有竞争力的价格策略\n- 技术方案以"合格"为标准，不过度展开，简明扼要即可",
+        "综合均衡型": "【投标策略】：综合均衡型\n- 技术和价格平衡，在满足招标要求的前提下追求性价比最优\n- 技术方案完整、专业，但不过度冗余\n- 报价合理有竞争力，既不过高也不恶性低价\n- 标书整体均衡、专业、完整，能满足评标的各方面要求",
+    }
+    return strategies.get(strategy, strategies["综合均衡型"])
 
 
 @router.post("/generate/stream")
@@ -639,6 +661,8 @@ async def generate_bid_stream(req: BidGenerateReq):
 
 {bid_info}
 
+{_get_strategy_guidance(req.strategy)}
+
 可用素材：
 {materials_text[:5000] if materials_text else "无"}
 
@@ -651,6 +675,32 @@ async def generate_bid_stream(req: BidGenerateReq):
 输出格式：Markdown"""
 
     async def stream_response():
+        chapters = req.chapters or []
+        chapter_status = {ch.get("index", i): {"name": ch.get("name", ""), "status": "pending", "progress": 0} for i, ch in enumerate(chapters)}
+
+        def _emit_chapter_start(idx, name):
+            yield _sse_event({"stage": "chapter_start", "chapter_index": idx, "chapter_name": name})
+
+        def _emit_chapter_done(idx, name):
+            yield _sse_event({"stage": "chapter_done", "chapter_index": idx, "chapter_name": name})
+
+        def _emit_chapter_progress(idx, name, progress):
+            yield _sse_event({"stage": "chapter_progress", "chapter_index": idx, "chapter_name": name, "progress": progress})
+
+        # Chapter name → index map (for matching headings)
+        chapter_name_to_idx = {}
+        for ch in chapters:
+            name = ch.get("name", "")
+            # strip chapter number prefix like "第一章 " → "技术标"
+            for suffix in ["第一章 ", "第二章 ", "第三章 ", "第四章 ", "第五章 ", "第六章 ", "第七章 ", "第八章 ", "第九章 ", "第十章 ", "第1章 ", "第2章 ", "第3章 ", "第4章 ", "第5章 "]:
+                if name.startswith(suffix):
+                    name = name[len(suffix):]
+                    break
+            chapter_name_to_idx[name] = ch.get("index", 0)
+
+        active_chapter_idx = None
+        active_chapter_name = ""
+
         # 阶段0：生成前废标项预检
         yield _sse_event({"stage": "violation_check", "progress": 5, "message": "正在检测废标项风险..."})
         
@@ -682,11 +732,36 @@ async def generate_bid_stream(req: BidGenerateReq):
         content_parts = []
         for delta in generator.generate_stream(prompt, system=SYSTEM_PROMPT):
             content_parts.append(delta)
+
+            # Detect chapter headings from delta (markdown headings like "# 投标函" or "## 第一章 投标函")
+            heading_match = re.match(r"^(#{1,4})\s+(.+?)\n", delta)
+            if heading_match and chapters:
+                heading_text = heading_match.group(2).strip()
+                # Check if this heading matches a known chapter
+                for ch_name, ch_idx in chapter_name_to_idx.items():
+                    if ch_name in heading_text or heading_text in ch_name:
+                        if active_chapter_idx != ch_idx:
+                            # Emit chapter_done for previous chapter
+                            if active_chapter_idx is not None:
+                                for _ in _emit_chapter_done(active_chapter_idx, active_chapter_name):
+                                    yield _
+                            # Emit chapter_start for new chapter
+                            active_chapter_idx = ch_idx
+                            active_chapter_name = ch_name
+                            for _ in _emit_chapter_start(ch_idx, ch_name):
+                                yield _
+                        break
+
             # 估算进度 10-60%
             yield _sse_event({"stage": "generating", "progress": 30, "message": "生成中...", "delta": delta})
 
         content = "".join(content_parts)
-        
+
+        # Mark last active chapter as done
+        if active_chapter_idx is not None:
+            for _ in _emit_chapter_done(active_chapter_idx, active_chapter_name):
+                yield _
+
         # ── 阶段2：废标项检测（基于生成的标书正文）───────────────────────
         yield _sse_event({"stage": "violation_check", "progress": 65, "message": "废标项合规性检测..."})
         if req.parse_result:
@@ -737,13 +812,35 @@ async def generate_bid_stream(req: BidGenerateReq):
         output_path = GENERATED_DIR / f"bid_{uuid.uuid4().hex[:8]}.docx"
         doc.save(str(output_path))
 
+        # 自动保存版本历史
+        version_id = _save_bid_version(
+            project_name=req.parse_result.get("project_name", ""),
+            parse_result=req.parse_result,
+            bid_content=content,
+            strategy="",
+            file_path=str(output_path),
+            material_ids=req.materials or [],
+        )
+
         # 阶段6：完成
+        final_chapters = []
+        for ch in chapters:
+            idx = ch.get("index", 0)
+            final_chapters.append({
+                "index": idx,
+                "name": ch.get("name", ""),
+                "status": "completed" if idx != active_chapter_idx else "completed",
+                "progress": 100,
+            })
+
         yield _sse_event({
             "stage": "done",
             "progress": 100,
             "message": "生成完成",
+            "version_id": version_id,
             "file_path": str(output_path),
             "filename": output_path.name,
+            "chapters": final_chapters,
             "review": {
                 "passed": review["passed"],
                 "score": review.get("score", 0),
@@ -913,6 +1010,135 @@ def match_check(req: BidMatchCheckReq):
         },
         "warning": "部分素材与招标文件匹配度较低，建议更换或补充相关素材" if low_count > 0 else None,
     }
+
+
+# ── 标书历史版本管理 ───────────────────────────────────────────────────────────
+
+
+@router.get("/versions")
+def list_bid_versions(project_name: Optional[str] = None):
+    """获取标书历史版本列表（按时间倒序）"""
+    conn = get_db()
+    cur = conn.cursor()
+    if project_name:
+        cur.execute(
+            """SELECT id, project_name, strategy, generated_at, file_path, material_ids
+               FROM bid_versions
+               WHERE project_name LIKE ?
+               ORDER BY generated_at DESC""",
+            (f"%{project_name}%",)
+        )
+    else:
+        cur.execute(
+            """SELECT id, project_name, strategy, generated_at, file_path, material_ids
+               FROM bid_versions
+               ORDER BY generated_at DESC
+               LIMIT 50"""
+        )
+    rows = cur.fetchall()
+    conn.close()
+    return {"versions": [dict(r) for r in rows]}
+
+
+@router.get("/versions/{version_id}")
+def get_bid_version(version_id: int):
+    """获取指定版本详情"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, project_name, parse_result_json, bid_content, strategy,
+                  generated_at, file_path, material_ids
+           FROM bid_versions WHERE id = ?""",
+        (version_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    r = dict(row)
+    # 反序列化 JSON 字段
+    if r.get("parse_result_json"):
+        r["parse_result"] = json.loads(r["parse_result_json"])
+    else:
+        r["parse_result"] = {}
+    if r.get("material_ids"):
+        r["material_ids"] = json.loads(r["material_ids"])
+    else:
+        r["material_ids"] = []
+    return r
+
+
+@router.get("/versions/compare")
+def compare_bid_versions(from_id: int, to_id: int):
+    """对比两个版本的差异（简单行对比）"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, bid_content FROM bid_versions WHERE id IN (?, ?)",
+        (from_id, to_id)
+    )
+    rows = {r["id"]: r for r in cur.fetchall()}
+    conn.close()
+    if from_id not in rows or to_id not in rows:
+        raise HTTPException(status_code=404, detail="版本不存在")
+
+    content_from = rows[from_id]["bid_content"] or ""
+    content_to = rows[to_id]["bid_content"] or ""
+
+    diff_lines = difflib.unified_diff(
+        content_from.splitlines(keepends=True),
+        content_to.splitlines(keepends=True),
+        fromfile=f"v{from_id}",
+        tofile=f"v{to_id}",
+        lineterm=""
+    )
+    return {
+        "from_id": from_id,
+        "to_id": to_id,
+        "diff_text": "".join(diff_lines),
+    }
+
+
+@router.post("/versions/{version_id}/restore")
+def restore_bid_version(version_id: int):
+    """恢复指定版本：返回该版本的解析结果和素材ID，供前端重新生成"""
+    version = get_bid_version(version_id)
+    return {
+        "parse_result": version.get("parse_result", {}),
+        "material_ids": version.get("material_ids", []),
+        "project_name": version.get("project_name", ""),
+        "version_id": version_id,
+    }
+
+
+def _save_bid_version(
+    project_name: str,
+    parse_result: dict,
+    bid_content: str,
+    strategy: str,
+    file_path: str,
+    material_ids: List[int],
+):
+    """将一次生成结果写入 bid_versions 表"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO bid_versions
+           (project_name, parse_result_json, bid_content, strategy, file_path, material_ids)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            project_name,
+            json.dumps(parse_result, ensure_ascii=False),
+            bid_content,
+            strategy,
+            file_path,
+            json.dumps(material_ids, ensure_ascii=False),
+        )
+    )
+    conn.commit()
+    version_id = cur.lastrowid
+    conn.close()
+    return version_id
 
 
 # ── 废标项检查 ─────────────────────────────────────────────────────────────────

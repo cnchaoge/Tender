@@ -76,6 +76,20 @@ def init_db():
         )
     """)
 
+    # 标书版本历史
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bid_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT,
+            parse_result_json TEXT,
+            bid_content TEXT,
+            strategy TEXT,
+            generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            file_path TEXT,
+            material_ids TEXT
+        )
+    """)
+
     # 默认管理员账号 admin / admin123
     from passlib.context import CryptContext
     pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")

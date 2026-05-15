@@ -286,6 +286,25 @@
         <!-- 生成标书 -->
         <div class="section-label" style="margin-top: 28px">生成</div>
         <div class="generate-card">
+          <!-- 策略选择 -->
+          <div class="strategy-selector">
+            <div class="strategy-label">策略选择</div>
+            <div class="strategy-options">
+              <label
+                v-for="opt in strategyOptions"
+                :key="opt.value"
+                class="strategy-option"
+                :class="{ active: selectedStrategy === opt.value }"
+              >
+                <input type="radio" :value="opt.value" v-model="selectedStrategy" style="display:none" />
+                <div class="strategy-option-inner">
+                  <span class="strategy-name">{{ opt.label }}</span>
+                  <span class="strategy-desc">{{ opt.desc }}</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
           <el-button
             type="primary"
             class="generate-btn"
@@ -305,6 +324,25 @@
             </div>
             <div class="gen-progress-bar">
               <div class="gen-progress-fill" :style="{ width: progress + '%' }"></div>
+            </div>
+            <!-- Chapter progress bars -->
+            <div class="chapter-progress-list" v-if="Object.keys(chapterStates).length">
+              <div
+                v-for="(state, chIdx) in chapterStates"
+                :key="chIdx"
+                class="chapter-progress-item"
+              >
+                <div class="chapter-name">{{ state.name }}</div>
+                <div class="chapter-bar-wrap">
+                  <el-progress
+                    :percentage="state.progress"
+                    :status="state.status === 'completed' ? 'success' : undefined"
+                    :stroke-width="8"
+                    :show-text="true"
+                    :format="p => p + '%'"
+                  />
+                </div>
+              </div>
             </div>
             <!-- Streaming Preview (Markdown rendered) -->
             <div class="streaming-preview" v-if="renderedContent">
@@ -413,6 +451,63 @@
             </div>
           </div>
         </div>
+
+        <!-- 历史版本 -->
+        <div class="section-label" style="margin-top: 28px">历史版本</div>
+        <div class="versions-card">
+          <div v-if="loadingVersions" class="versions-loading">
+            <span class="versions-spinner"></span> 加载中...</div>
+          <div v-else-if="versionList.length === 0" class="versions-empty">
+            暂无历史版本
+          </div>
+          <div v-else class="version-list">
+            <div
+              v-for="v in versionList"
+              :key="v.id"
+              class="version-item"
+              :class="{ expanded: expandedVersionId === v.id }"
+            >
+              <div class="version-header" @click="toggleVersion(v.id)">
+                <div class="version-info">
+                  <span class="version-date">{{ formatDate(v.generated_at) }}</span>
+                  <span class="version-name">{{ v.project_name || '未命名项目' }}</span>
+                </div>
+                <el-icon class="version-arrow" :class="{ open: expandedVersionId === v.id }"><component :is="ArrowRight" /></el-icon>
+              </div>
+              <div v-if="expandedVersionId === v.id" class="version-body">
+                <div class="version-content" v-html="renderMarkdown(versionContents[v.id] || '')"></div>
+                <div class="version-actions">
+                  <el-button size="small" @click="regenerateFromVersion(v.id)">
+                    基于此版本重新生成
+                  </el-button>
+                  <el-button size="small" @click="showCompareDialog(v.id)">
+                    对比
+                  </el-button>
+                  <a v-if="v.file_path" :href="`${apiBase()}/api/bid/download/${getFilename(v.file_path)}`" target="_blank" class="version-download">
+                    <el-icon><component :is="Download" /></el-icon>
+                    下载
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 对比弹窗 -->
+        <el-dialog v-model="compareDialogVisible" title="版本对比" width="800px" :close-on-click-modal="true">
+          <div class="compare-controls">
+            <el-select v-model="compareFromId" placeholder="选择版本A" size="small" style="width: 200px">
+              <el-option v-for="v in versionList" :key="v.id" :label="`v${v.id} - ${v.project_name || '未命名'}`" :value="v.id" />
+            </el-select>
+            <span style="padding: 0 8px; color: var(--color-ink-subtle)">vs</span>
+            <el-select v-model="compareToId" placeholder="选择版本B" size="small" style="width: 200px">
+              <el-option v-for="v in versionList" :key="v.id" :label="`v${v.id} - ${v.project_name || '未命名'}`" :value="v.id" />
+            </el-select>
+            <el-button size="small" type="primary" :loading="comparing" @click="doCompare" style="margin-left: 8px">对比</el-button>
+          </div>
+          <pre v-if="compareDiff" class="compare-diff">{{ compareDiff }}</pre>
+          <div v-else class="compare-empty">选择两个版本后点击对比</div>
+        </el-dialog>
       </div>
     </div>
 
@@ -454,7 +549,12 @@ import { useKbStore } from "../stores/kb"
 import api from "../api"
 import { marked } from "marked"
 // Configure marked for security (no async)
+// Configure marked for security (no async)
 marked.setOptions({ breaks: true, gfm: true })
+
+onMounted(() => {
+  loadVersions()
+})
 
 const kbStore = useKbStore()
 // 统一 API 基础路径：dev 走相对路径（Vite proxy），prod 用完整 URL
@@ -487,6 +587,28 @@ const violationResult = ref(null)   // 废标项检测结果
 const plagiarismResult = ref(null)   // 标书查重结果
 const formatResult = ref(null)       // 格式检查结果
 const openScoringSections = ref(new Set()) // 展开的评分项section索引
+
+// 投标策略选项
+const strategyOptions = [
+  { label: "技术优先型", value: "技术优先型", desc: "技术方案详细、质量最高、价格适中" },
+  { label: "成本控制型", value: "成本控制型", desc: "价格最低方案，利润优先" },
+  { label: "综合均衡型", value: "综合均衡型", desc: "技术和价格平衡，性价比最优" },
+]
+const selectedStrategy = ref("综合均衡型") // 默认选中
+
+// Chapter progress state: Map<chapter_index, {name, status, progress}>
+const chapterStates = ref({})
+
+// 历史版本
+const versionList = ref([])
+const loadingVersions = ref(false)
+const expandedVersionId = ref(null)
+const versionContents = ref({})
+const compareDialogVisible = ref(false)
+const compareFromId = ref(null)
+const compareToId = ref(null)
+const compareDiff = ref("")
+const comparing = ref(false)
 
 function toggleScoringSection(idx) {
   if (openScoringSections.value.has(idx)) openScoringSections.value.delete(idx)
@@ -540,6 +662,95 @@ function matchScoreClass(level) {
 function getMatchInfo(docId) {
   if (!matchCheckResult.value) return null
   return matchCheckResult.value.materials.find(m => m.doc_id === docId) || null
+}
+
+// 历史版本
+async function loadVersions() {
+  loadingVersions.value = true
+  try {
+    const resp = await api.get("/api/bid/versions", {
+      params: parseResult.value?.project_name
+        ? { project_name: parseResult.value.project_name }
+        : {}
+    })
+    versionList.value = resp.data.versions || []
+  } catch {
+    // 静默失败
+  } finally {
+    loadingVersions.value = false
+  }
+}
+
+function toggleVersion(vid) {
+  if (expandedVersionId.value === vid) {
+    expandedVersionId.value = null
+    return
+  }
+  expandedVersionId.value = vid
+  if (!versionContents.value[vid]) {
+    loadVersionContent(vid)
+  }
+}
+
+async function loadVersionContent(vid) {
+  try {
+    const resp = await api.get(`/api/bid/versions/${vid}`)
+    versionContents.value[vid] = resp.data.bid_content || ""
+  } catch {
+    versionContents.value[vid] = "加载失败"
+  }
+}
+
+async function regenerateFromVersion(vid) {
+  try {
+    const resp = await api.post(`/api/bid/versions/${vid}/restore`)
+    const data = resp.data
+    if (data.parse_result) {
+      parseResult.value = data.parse_result
+    }
+    if (data.material_ids?.length) {
+      selectedMaterials.value = data.material_ids
+    }
+    ElMessage.success("已加载版本数据，点击生成按钮重新生成")
+  } catch {
+    ElMessage.error("恢复版本失败")
+  }
+}
+
+async function showCompareDialog(vid) {
+  compareFromId.value = vid
+  compareToId.value = versionList.value.find(v => v.id !== vid)?.id || null
+  compareDiff.value = ""
+  compareDialogVisible.value = true
+}
+
+async function doCompare() {
+  if (!compareFromId.value || !compareToId.value) return
+  comparing.value = true
+  try {
+    const resp = await api.get("/api/bid/versions/compare", {
+      params: { from_id: compareFromId.value, to_id: compareToId.value }
+    })
+    compareDiff.value = resp.data.diff_text || "无差异"
+  } catch {
+    ElMessage.error("对比失败")
+  } finally {
+    comparing.value = false
+  }
+}
+
+function formatDate(ts) {
+  if (!ts) return ""
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`
+}
+
+function getFilename(path) {
+  return path ? path.split("/").pop() : ""
+}
+
+function renderMarkdown(text) {
+  return marked.parse(text || "")
 }
 
 function triggerUpload() {
@@ -695,6 +906,16 @@ async function doGenerate() {
   progressMessage.value = ""
   streamingContent.value = ""
   renderedContent.value = ""
+  chapterStates.value = {}
+
+  // Initialize chapter states from planningChapters
+  for (const ch of planningChapters.value) {
+    chapterStates.value[ch.index] = {
+      name: ch.name,
+      status: "pending",
+      progress: 0,
+    }
+  }
 
   try {
     const token = localStorage.getItem("token") || ""
@@ -706,7 +927,8 @@ async function doGenerate() {
       },
       body: JSON.stringify({
         parse_result: parseResult.value,
-        materials: selectedMaterials.value
+        materials: selectedMaterials.value,
+        chapters: planningChapters.value,
       })
     })
     if (!response.ok) {
@@ -751,6 +973,8 @@ async function doGenerate() {
             if (data.violation_result) violationResult.value = data.violation_result
             if (data.plagiarism_result) plagiarismResult.value = data.plagiarism_result
             if (data.format_result) formatResult.value = data.format_result
+            // 刷新历史版本列表
+            loadVersions()
           }
         } catch {}
       }
@@ -1685,6 +1909,138 @@ async function doGenerate() {
   font-size: 12px;
   color: var(--color-ink-subtle);
   line-height: 1.4;
+}
+
+/* ── Version History ── */
+.versions-card {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  min-height: 80px;
+}
+.versions-loading, .versions-empty {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  text-align: center;
+  padding: 16px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.versions-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-hairline);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.version-item {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.version-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: var(--color-surface-2);
+  user-select: none;
+}
+.version-header:hover { background: var(--color-surface-3); }
+.version-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.version-date {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  flex-shrink: 0;
+}
+.version-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.version-arrow {
+  font-size: 12px;
+  color: var(--color-ink-tertiary);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.version-arrow.open { transform: rotate(90deg); }
+.version-body {
+  padding: 12px;
+  border-top: 1px solid var(--color-hairline);
+  background: #fff;
+}
+.version-content {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  line-height: 1.6;
+}
+.version-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.version-download {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  text-decoration: none;
+  padding: 5px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+}
+.version-download:hover { color: var(--color-ink); background: var(--color-surface-2); }
+
+/* ── Compare Dialog ── */
+.compare-controls {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.compare-diff {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 500px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+.compare-empty {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  text-align: center;
+  padding: 40px;
 }
 
 /* ── Shared ── */

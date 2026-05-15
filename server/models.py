@@ -100,6 +100,8 @@ class BidParseResp(BaseModel):
 class BidGenerateReq(BaseModel):
     parse_result: dict  # BidParseResp 结果
     materials: List[int]  # 素材文档 ID 列表
+    chapters: Optional[List[dict]] = None  # plan 阶段返回的章节列表 [{index, name, description, status}]
+    strategy: str = "综合均衡型"  # 投标策略: 技术优先型 | 成本控制型 | 综合均衡型
 
 
 class BidMatchCheckReq(BaseModel):
@@ -113,7 +115,7 @@ class BidPlanReq(BaseModel):
 
 
 class BidPlanResp(BaseModel):
-    chapters: List[dict]  # [{name: str, description: str}]
+    chapters: List[dict]  # [{index: int, name: str, description: str, status: str}]
 
 
 # ============ 标书质检 ============
