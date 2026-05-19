@@ -6,7 +6,7 @@
       <div class="hero-inner">
         <div class="hero-brand">
           <span class="brand-icon">⚡</span>
-          <span class="brand-name">ClawOS X</span>
+          <span class="brand-name">Tender</span>
         </div>
         <h1 class="hero-headline">制造业投标标书<br>AI 一键生成</h1>
         <p class="hero-sub">上传产品资料 / 选择标书模板 / 生成专业投标文件</p>
@@ -39,7 +39,7 @@
         <div class="login-logo">
           <div class="logo-icon">⚡</div>
           <div class="logo-text">
-            <div class="logo-name">ClawOS X</div>
+            <div class="logo-name">Tender</div>
             <div class="logo-sub">智能投标标书系统</div>
           </div>
         </div>

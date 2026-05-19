@@ -1,4 +1,4 @@
-# ClawOS X 开发路线图
+# Tender 开发路线图
 
 > 项目周期：预计 6-8 周出 MVP
 
@@ -11,7 +11,7 @@
 **时间**：1-2 周
 
 ### 1.1 项目初始化
-- [ ] 创建 GitHub 仓库 clawosx
+- [ ] 创建 GitHub 仓库 tender
 - [ ] 搭建 Python 后端骨架（FastAPI）
 - [ ] 引入依赖：langchain, chromadb, openai/deepseek SDK
 - [ ] 引入依赖：pdfplumber, python-docx（文档解析）
@@ -170,7 +170,7 @@
 ## 项目结构（待定）
 
 ```
-clawosx/
+tender/
 ├── server/                 # Python 后端
 │   ├── main.py            # FastAPI 入口
 │   ├── api/               # API 路由
@@ -196,6 +196,6 @@ clawosx/
 │   └── build.sh          # PyInstaller 打包
 ├── data/                  # 数据目录（运行时生成）
 ├── README.md
-├── CLAWOSX-DEV-ROADMAP.md
-└── CLAWOSX-PLAN.md
+├── TENDER-DEV-ROADMAP.md
+└── TENDER-PLAN.md
 ```

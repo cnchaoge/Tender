@@ -5,7 +5,7 @@
     <header class="topbar">
       <div class="topbar-brand">
         <span class="brand-icon">⚡</span>
-        <span class="brand-name">ClawOS X</span>
+        <span class="brand-name">Tender</span>
       </div>
       <button class="hamburger" @click="mobileMenuOpen = !mobileMenuOpen" :class="{ active: mobileMenuOpen }">
         <span></span><span></span><span></span>
@@ -17,7 +17,7 @@
       <div class="sidebar-inner">
         <div class="sidebar-brand">
           <span class="brand-icon">⚡</span>
-          <span class="brand-name">ClawOS X</span>
+          <span class="brand-name">Tender</span>
         </div>
 
         <nav class="sidebar-nav">

@@ -1,5 +1,5 @@
 """
-ClawOS X - 文本切片策略
+Tender - 文本切片策略
 按字符数切，支持重叠
 """
 from typing import List

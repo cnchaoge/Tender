@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul 2>&1
 echo ======================================
-echo  ClawOS X Starting...
+echo  Tender Starting...
 echo ======================================
 echo.
 

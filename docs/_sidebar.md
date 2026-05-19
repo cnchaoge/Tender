@@ -1,6 +1,6 @@
 * [首页](/)
 * [一、产品概述](/manual/01-intro)
-  * [什么是 ClawOS X](/manual/01-intro#什么是-clawos-x)
+  * [什么是 Tender](/manual/01-intro#什么是-clawos-x)
   * [产品优势](/manual/01-intro#产品优势)
   * [系统要求](/manual/01-intro#系统要求)
 * [二、安装与启动](/manual/02-install)

@@ -1,4 +1,4 @@
-# ClawOS X 产品计划书 v1.0
+# Tender 产品计划书 v1.0
 
 > 版本：v1.0 MVP
 > 更新：2026-05-06
@@ -214,7 +214,7 @@ data/
 ### 6.1 单文件部署
 
 ```
-ClawOSX.exe  (PyInstaller 打包)
+Tender.exe  (PyInstaller 打包)
 ├── Python 运行时
 ├── FastAPI 后端
 ├── Vue3 前端（内嵌）
@@ -224,7 +224,7 @@ ClawOSX.exe  (PyInstaller 打包)
 ```
 
 **安装流程**：
-1. 双击 ClawOSX.exe
+1. 双击 Tender.exe
 2. 首次运行 → 设置管理员密码
 3. 浏览器打开 http://localhost:8000
 4. 配置 AI API Key
@@ -260,7 +260,7 @@ ClawOSX.exe  (PyInstaller 打包)
 
 ## 八、竞品分析
 
-| 功能 | ClawOS X | 通用 AI 助手 | 传统投标软件 |
+| 功能 | Tender | 通用 AI 助手 | 传统投标软件 |
 |------|---------|-------------|-------------|
 | 本地部署 | ✓ | ✗ | ✓ |
 | 标书生成 | ✓ | ✗ | 部分 |

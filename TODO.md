@@ -1,4 +1,4 @@
-# ClawOS X 待办
+# Tender 待办
 
 ## 产品化
 
@@ -13,4 +13,4 @@
 
 ## 已完成
 
-- [x] PyInstaller 打包 ClawOS X 为 Windows 单文件 exe
+- [x] PyInstaller 打包 Tender 为 Windows 单文件 exe

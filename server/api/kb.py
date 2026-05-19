@@ -1,5 +1,5 @@
 """
-ClawOS X - 知识库管理 API
+Tender - 知识库管理 API
 """
 import os
 import shutil

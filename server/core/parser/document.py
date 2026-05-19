@@ -1,5 +1,5 @@
 """
-ClawOS X - 文档解析器
+Tender - 文档解析器
 支持 PDF, Word, Excel, Markdown, TXT, 图片(OCR)
 """
 import os

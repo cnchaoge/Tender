@@ -1,5 +1,5 @@
 """
-ClawOS X - 系统托盘
+Tender - 系统托盘
 pystray 做托盘，settings 用 PowerShell 独立窗口
 """
 import threading, webbrowser, subprocess, tempfile, os
@@ -39,7 +39,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "ClawOS X 设置"
+$form.Text = "Tender 设置"
 $form.Size = New-Object System.Drawing.Size(480, 220)
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -156,7 +156,7 @@ $form.ShowDialog() | Out-Null
 
 If ($done -and $saved_key) {{
     $provider = $cmbModel.SelectedItem
-    "$provider`t$saved_key" | Out-File -FilePath "$env:TEMP\\clawosx_settings.txt" -Encoding UTF8
+    "$provider`t$saved_key" | Out-File -FilePath "$env:TEMP\\tender_settings.txt" -Encoding UTF8
 }}
 '''
 
@@ -173,7 +173,7 @@ If ($done -and $saved_key) {{
     except Exception:
         pass
 
-    settings_file = os.path.join(os.environ.get('TEMP', ''), 'clawosx_settings.txt')
+    settings_file = os.path.join(os.environ.get('TEMP', ''), 'tender_settings.txt')
     if os.path.exists(settings_file):
         with open(settings_file, 'r', encoding='utf-8') as f:
             content = f.read().strip()
@@ -222,7 +222,7 @@ def _run_tray():
         MI("重启服务", _on_restart),
         MI("退出", _on_exit),
     )
-    _tray = pystray.Icon("ClawOSX", icon=img, title="ClawOS X", menu=menu)
+    _tray = pystray.Icon("Tender", icon=img, title="Tender", menu=menu)
     _tray.run()
 
 def setup_tray(restart_callback):

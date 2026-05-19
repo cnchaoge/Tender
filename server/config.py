@@ -1,5 +1,5 @@
 """
-ClawOS X - 配置管理
+Tender - 配置管理
 """
 import os, sys
 from pathlib import Path
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # 服务
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    SECRET_KEY: str = "clawosx-secret-key-change-in-production"
+    SECRET_KEY: str = "tender-secret-key-change-in-production"
     DEBUG: bool = True
 
     # JWT

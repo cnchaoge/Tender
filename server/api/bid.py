@@ -1,5 +1,5 @@
 """
-ClawOS X - 标书生成 API
+Tender - 标书生成 API
 """
 import re
 import uuid

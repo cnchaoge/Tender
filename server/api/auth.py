@@ -1,5 +1,5 @@
 """
-ClawOS X - 认证 API
+Tender - 认证 API
 """
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException

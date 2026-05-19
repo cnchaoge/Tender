@@ -4,7 +4,7 @@
 
 ```
 ┌─────────────────────────────────────┐
-│          ClawOS X 客户端             │
+│          Tender 客户端             │
 │  浏览器 (Vue3 SPA)                   │
 └─────────────────────────────────────┘
                 │ HTTP
@@ -49,4 +49,4 @@
 
 - 当前版本：v1.0 MVP
 - 最后更新：2026-05-15
-- 产品主页：https://github.com/cnchaoge/clawosx
+- 产品主页：https://github.com/cnchaoge/tender

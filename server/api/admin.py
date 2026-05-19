@@ -1,5 +1,5 @@
 """
-ClawOS X - 管理后台 API（统一配置 + 用户管理）
+Tender - 管理后台 API（统一配置 + 用户管理）
 """
 import os
 import signal

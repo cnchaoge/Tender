@@ -1,11 +1,11 @@
 """
-ClawOS X - SQLite 数据库初始化
+Tender - SQLite 数据库初始化
 """
 import sqlite3
 from pathlib import Path
 from server.config import DATA_DIR
 
-DB_PATH = DATA_DIR / "clawosx.db"
+DB_PATH = DATA_DIR / "tender.db"
 
 
 def get_db():

@@ -1,5 +1,5 @@
 """
-ClawOS X - ChromaDB 向量数据库
+Tender - ChromaDB 向量数据库
 """
 import chromadb
 from chromadb.config import Settings
@@ -28,7 +28,7 @@ def get_collection():
         client = get_chroma_client()
         _collection = client.get_or_create_collection(
             name="documents",
-            metadata={"description": "ClawOS X document chunks"}
+            metadata={"description": "Tender document chunks"}
         )
     return _collection
 

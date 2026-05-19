@@ -6,7 +6,7 @@
       <div class="hero-left">
         <div class="hero-brand">
           <span class="brand-icon">⚡</span>
-          <span class="brand-name">ClawOS X</span>
+          <span class="brand-name">Tender</span>
         </div>
         <h1 class="hero-title">制造业投标标书<br>AI 一键生成</h1>
         <p class="hero-desc">上传产品资料 · 选择模板 · 生成专业投标文件</p>

@@ -1,12 +1,12 @@
 """
-ClawOS X - 违规案例库数据预填充
+Tender - 违规案例库数据预填充
 内置招投标领域常见废标项和违规案例
 """
 import sqlite3
 from pathlib import Path
 from server.config import DATA_DIR
 
-DB_PATH = DATA_DIR / "clawosx.db"
+DB_PATH = DATA_DIR / "tender.db"
 
 
 def init_violation_db():

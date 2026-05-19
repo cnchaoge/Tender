@@ -1,5 +1,5 @@
 """
-ClawOS X - FastAPI 入口
+Tender - FastAPI 入口
 """
 import sys, os, time
 from pathlib import Path
@@ -43,7 +43,7 @@ def _get_resource_path(relative_path: str) -> Path:
     return Path(__file__).resolve().parent.parent / relative_path
 
 
-app = FastAPI(title="ClawOS X", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Tender", version="1.0.0", lifespan=lifespan)
 
 # CORS
 app.add_middleware(
@@ -81,7 +81,7 @@ def docs_index():
 async def root():
     if WEB_DIST.exists():
         return FileResponse(str(WEB_DIST / "index.html"))
-    return {"message": "ClawOS X API", "version": "1.0.0", "error": "web dist not found"}
+    return {"message": "Tender API", "version": "1.0.0", "error": "web dist not found"}
 
 
 @app.get("/health")

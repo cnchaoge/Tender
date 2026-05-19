@@ -1,5 +1,5 @@
 """
-ClawOS X - 标书质检模块
+Tender - 标书质检模块
 生成正文后，AI 自我审查，检查完整性和格式
 """
 from typing import Optional

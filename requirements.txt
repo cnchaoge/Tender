@@ -1,4 +1,4 @@
-# ClawOS X - Requirements
+# Tender - Requirements
 
 # Web framework
 fastapi==0.115.0

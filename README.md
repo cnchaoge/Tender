@@ -1,9 +1,9 @@
-# ⚡ ClawOS X
+# ⚡ Tender
 
 **制造业投标标书 AI 助手 — 本地部署，开箱即用**
 
-[![Stars](https://img.shields.io/github/stars/cnchaoge/clawosx?style=flat-square)](https://github.com/cnchaoge/clawosx)
-[![License](https://img.shields.io/github/license/cnchaoge/clawosx?style=flat-square)](./LICENSE)
+[![Stars](https://img.shields.io/github/stars/cnchaoge/tender?style=flat-square)](https://github.com/cnchaoge/tender)
+[![License](https://img.shields.io/github/license/cnchaoge/tender?style=flat-square)](./LICENSE)
 
 ---
 
@@ -15,7 +15,7 @@
 - **经验少** — 缺乏专业文档人员，模板难找
 - **数据安全** — 工厂资料不想上传到外部服务器
 
-**ClawOS X** 将 AI 能力本地化，让标书生成在工厂自己的电脑上完成，文件永不离开。
+**Tender** 将 AI 能力本地化，让标书生成在工厂自己的电脑上完成，文件永不离开。
 
 ---
 
@@ -98,7 +98,7 @@ uvicorn main:app --reload --port 8000
 ## 📂 项目结构
 
 ```
-ClawOSX/
+Tender/
 ├── server/              # FastAPI 后端
 │   ├── api/             # API 路由（管理/知识库/标书）
 │   ├── core/            # 核心配置

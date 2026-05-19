@@ -1,5 +1,5 @@
 """
-ClawOS X - RAG 检索器
+Tender - RAG 检索器
 """
 from server.db.chromadb import query_chunks
 from server.db.sqlite import get_db

@@ -1,5 +1,5 @@
 """
-ClawOS X - Embedding 模型
+Tender - Embedding 模型
 支持 通义 / BGE
 """
 from server.config import get_settings, BASE_DIR

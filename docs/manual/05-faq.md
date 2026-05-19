@@ -42,7 +42,7 @@ Embedding 模型 API Key 配置错误。
 
 ## Q5：如何更新到新版本？
 
-1. 下载最新版的 `ClawOSX.exe`
+1. 下载最新版的 `Tender.exe`
 2. 替换旧文件（建议先备份 `data` 文件夹）
 3. 重启程序
 

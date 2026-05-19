@@ -1,5 +1,5 @@
 """
-ClawOS X - 数据模型
+Tender - 数据模型
 """
 from pydantic import BaseModel, Field
 from typing import Optional, List, Union, Dict, Any

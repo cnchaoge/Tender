@@ -1,5 +1,5 @@
 """
-ClawOS X - RAG 问答 API
+Tender - RAG 问答 API
 """
 from fastapi import APIRouter
 from server.core.retriever.retriever import retrieve, build_context

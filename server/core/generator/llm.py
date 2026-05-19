@@ -1,5 +1,5 @@
 """
-ClawOS X - LLM 生成器
+Tender - LLM 生成器
 支持 DeepSeek / 通义 / OpenAI / Mock
 """
 from typing import Optional

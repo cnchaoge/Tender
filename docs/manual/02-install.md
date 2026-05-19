@@ -4,15 +4,15 @@
 
 从 GitHub 下载最新版本：
 
-👉 [https://github.com/cnchaoge/clawosx/releases](https://github.com/cnchaoge/clawosx/releases)
+👉 [https://github.com/cnchaoge/tender/releases](https://github.com/cnchaoge/tender/releases)
 
-下载 `ClawOSX.exe`（Windows 单文件版）
+下载 `Tender.exe`（Windows 单文件版）
 
 ---
 
 ## 首次启动
 
-**步骤 1：** 双击运行 `ClawOSX.exe`
+**步骤 1：** 双击运行 `Tender.exe`
 
 **步骤 2：** 首次运行会提示设置管理员密码
 
@@ -24,7 +24,7 @@
 
 ## 配置 AI API Key
 
-> ClawOS X 需要连接 AI 模型服务才能正常工作。
+> Tender 需要连接 AI 模型服务才能正常工作。
 
 **步骤 1：** 登录后进入 **系统设置** 页面
 
@@ -47,11 +47,11 @@
 
 ```bash
 # 前端（开发模式，热更新）
-cd clawosx/web
+cd tender/web
 npm install
 npm run dev     # 访问 http://localhost:5173
 
 # 后端（另一个终端）
-cd clawosx
+cd tender
 ./start.sh      # 访问 http://localhost:8000
 ```
