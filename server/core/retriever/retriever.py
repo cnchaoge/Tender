@@ -18,10 +18,22 @@ def retrieve(query: str, top_k: int = 5, doc_ids: list[int] = None) -> list[dict
     """
     chunks = query_chunks(query, top_k=top_k * 2 if not doc_ids else top_k)
     
-    # 获取文档名
+    # 获取文档名（一次性批量查询，避免 N+1）
     conn = get_db()
     cur = conn.cursor()
-    
+
+    doc_ids_in_chunks = set()
+    for chunk in chunks:
+        did = chunk["metadata"].get("doc_id")
+        if did:
+            doc_ids_in_chunks.add(did)
+
+    filename_map = {}
+    if doc_ids_in_chunks:
+        placeholders = ",".join("?" * len(doc_ids_in_chunks))
+        cur.execute(f"SELECT id, filename FROM documents WHERE id IN ({placeholders})", list(doc_ids_in_chunks))
+        filename_map = {row["id"]: row["filename"] for row in cur.fetchall()}
+
     results = []
     seen = set()
     for chunk in chunks:
@@ -31,23 +43,19 @@ def retrieve(query: str, top_k: int = 5, doc_ids: list[int] = None) -> list[dict
         if chunk["id"] in seen:
             continue
         seen.add(chunk["id"])
-        
-        cur.execute("SELECT filename FROM documents WHERE id = ?", (doc_id,))
-        row = cur.fetchone()
-        filename = row["filename"] if row else "unknown"
-        
+
         results.append({
             "id": chunk["id"],
             "text": chunk["text"],
             "metadata": chunk["metadata"],
             "score": 1 - chunk.get("distance", 0),  # 距离转相似度
             "doc_id": doc_id,
-            "filename": filename,
+            "filename": filename_map.get(doc_id, "unknown"),
         })
-        
+
         if len(results) >= top_k:
             break
-    
+
     conn.close()
     return results
 

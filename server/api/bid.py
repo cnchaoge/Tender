@@ -11,21 +11,198 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from pathlib import Path
 from docx import Document as DocxDocument
-from docx.shared import Pt, Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt, Inches, RGBColor, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from datetime import datetime
 
 
-def _set_run_font(run):
-    """设置 run 为宋体"""
-    run.font.name = "宋体"
+# ════════════════════════════════════════════════════════════════════════
+# 专业排版导出
+# ════════════════════════════════════════════════════════════════════════
+
+def _set_run_font(run, font_name="宋体", size_pt=None, bold=False, color=None):
+    """设置 run 字体属性"""
+    run.font.name = font_name
     rpr = run._element.get_or_add_rPr()
     rFonts = rpr.get_or_add_rFonts()
-    rFonts.set(qn("w:eastAsia"), "宋体")
+    rFonts.set(qn("w:eastAsia"), font_name)
+    if size_pt:
+        run.font.size = Pt(size_pt)
+    if bold:
+        run.font.bold = True
+    if color:
+        run.font.color.rgb = color
+
+
+def _setup_styles(doc):
+    """配置文档默认样式"""
+    style = doc.styles['Normal']
+    style.font.name = '宋体'
+    style.font.size = Pt(12)
+    style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+    pf = style.paragraph_format
+    pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+    pf.space_before = Pt(0)
+    pf.space_after = Pt(3)
+    for level, (size, bold) in {1: (22, True), 2: (16, True), 3: (14, True)}.items():
+        hs = doc.styles[f'Heading {level}']
+        hs.font.name = '黑体'
+        hs.font.size = Pt(size)
+        hs.font.bold = bold
+        hs.font.color.rgb = RGBColor(0, 0, 0)
+        hs.element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
+        hs.paragraph_format.space_before = Pt(12)
+        hs.paragraph_format.space_after = Pt(6)
+
+
+def _add_cover_page(doc, title, company_name, date_str):
+    """生成专业封面页（独立节，不显示页眉页脚）"""
+    section = doc.sections[0]
+    section.top_margin = Cm(3.5)
+    section.bottom_margin = Cm(2.5)
+    section.left_margin = Cm(2.5)
+    section.right_margin = Cm(2.5)
+    for _ in range(6):
+        doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("投 标 文 件")
+    _set_run_font(r, font_name="黑体", size_pt=26, bold=True)
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("━" * 30)
+    _set_run_font(r, color=RGBColor(0x99, 0x99, 0x99))
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("项目名称：")
+    _set_run_font(r, size_pt=16)
+    r2 = p.add_run(title)
+    _set_run_font(r2, font_name="黑体", size_pt=16, bold=True)
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("投标单位：")
+    _set_run_font(r, size_pt=14)
+    r2 = p.add_run(company_name)
+    _set_run_font(r2, size_pt=14, bold=True)
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(date_str)
+    _set_run_font(r, size_pt=14)
+    # 封面后的分节符
+    doc.add_section()
+    new_section = doc.sections[-1]
+    new_section.top_margin = Cm(2.5)
+    new_section.bottom_margin = Cm(2.5)
+    new_section.left_margin = Cm(2.5)
+    new_section.right_margin = Cm(2.5)
+    new_section.header.is_linked_to_previous = False
+    new_section.footer.is_linked_to_previous = False
+
+
+def _add_toc(doc):
+    """插入目录页（TOC 域代码）"""
+    p = doc.add_paragraph()
+    r = p.add_run("目  录")
+    _set_run_font(r, font_name="黑体", size_pt=22, bold=True)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph()
+    para = doc.add_paragraph()
+    run1 = para.add_run()
+    fld_char_begin = OxmlElement('w:fldChar')
+    fld_char_begin.set(qn('w:fldCharType'), 'begin')
+    run1._element.append(fld_char_begin)
+    run2 = para.add_run()
+    instr = OxmlElement('w:instrText')
+    instr.set(qn('xml:space'), 'preserve')
+    instr.text = ' TOC \\o "1-3" \\h \\z \\u '
+    run2._element.append(instr)
+    run3 = para.add_run()
+    fld_char_sep = OxmlElement('w:fldChar')
+    fld_char_sep.set(qn('w:fldCharType'), 'separate')
+    run3._element.append(fld_char_sep)
+    run4 = para.add_run("（目录，请在 Word 中按 Ctrl+A → F9 刷新）")
+    _set_run_font(run4, size_pt=12, color=RGBColor(0x99, 0x99, 0x99))
+    run5 = para.add_run()
+    fld_char_end = OxmlElement('w:fldChar')
+    fld_char_end.set(qn('w:fldCharType'), 'end')
+    run5._element.append(fld_char_end)
+    doc.add_page_break()
+
+
+def _setup_header_footer(doc, title):
+    """设置正文节的页眉页脚"""
+    section = doc.sections[-1]
+    header = section.header
+    header.is_linked_to_previous = False
+    hp = header.paragraphs[0]
+    hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = hp.add_run(title)
+    _set_run_font(r, size_pt=9, color=RGBColor(0x66, 0x66, 0x66))
+    footer = section.footer
+    footer.is_linked_to_previous = False
+    fp = footer.paragraphs[0]
+    fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r1 = fp.add_run("第 ")
+    _set_run_font(r1, size_pt=9, color=RGBColor(0x66, 0x66, 0x66))
+    run_page = fp.add_run()
+    fld_begin = OxmlElement('w:fldChar')
+    fld_begin.set(qn('w:fldCharType'), 'begin')
+    run_page._element.append(fld_begin)
+    instr_page = OxmlElement('w:instrText')
+    instr_page.set(qn('xml:space'), 'preserve')
+    instr_page.text = ' PAGE '
+    run_page._element.append(instr_page)
+    fld_sep = OxmlElement('w:fldChar')
+    fld_sep.set(qn('w:fldCharType'), 'separate')
+    run_page._element.append(fld_sep)
+    fld_end = OxmlElement('w:fldChar')
+    fld_end.set(qn('w:fldCharType'), 'end')
+    run_page._element.append(fld_end)
+    r2 = fp.add_run(" 页 / 共 ")
+    _set_run_font(r2, size_pt=9, color=RGBColor(0x66, 0x66, 0x66))
+    run_total = fp.add_run()
+    fld_begin2 = OxmlElement('w:fldChar')
+    fld_begin2.set(qn('w:fldCharType'), 'begin')
+    run_total._element.append(fld_begin2)
+    instr_total = OxmlElement('w:instrText')
+    instr_total.set(qn('xml:space'), 'preserve')
+    instr_total.text = ' NUMPAGES '
+    run_total._element.append(instr_total)
+    fld_sep2 = OxmlElement('w:fldChar')
+    fld_sep2.set(qn('w:fldCharType'), 'separate')
+    run_total._element.append(fld_sep2)
+    fld_end2 = OxmlElement('w:fldChar')
+    fld_end2.set(qn('w:fldCharType'), 'end')
+    run_total._element.append(fld_end2)
+    r3 = fp.add_run(" 页")
+    _set_run_font(r3, size_pt=9, color=RGBColor(0x66, 0x66, 0x66))
+
+
+def _resolve_image_path(img_path: str) -> Optional[Path]:
+    """解析 markdown 图片路径为实际文件路径"""
+    from server.config import BASE_DIR, UPLOADS_DIR
+    p = Path(img_path)
+    if p.is_absolute() and p.exists():
+        return p
+    candidates = [
+        BASE_DIR / p,
+        UPLOADS_DIR / p.name,
+        Path.cwd() / p,
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
 
 
 def _render_markdown_to_docx(doc: DocxDocument, content: str):
-    """将 markdown 内容渲染到 docx 文档（支持表格/标题/列表/段落）"""
+    """将 markdown 内容渲染到 docx 文档（支持表格/标题/列表/段落/图片）"""
     lines = content.split("\n")
     i = 0
 
@@ -45,9 +222,31 @@ def _render_markdown_to_docx(doc: DocxDocument, content: str):
                 heading = doc.add_heading(m.group(2), level=min(level, 3))
                 heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 for run in heading.runs:
-                    _set_run_font(run)
+                    _set_run_font(run, font_name="黑体")
                 i += 1
                 continue
+
+        # 图片 ![alt](path)
+        img_match = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)$", line)
+        if img_match:
+            img_path = img_match.group(2).strip()
+            abs_path = _resolve_image_path(img_path)
+            if abs_path and abs_path.exists():
+                try:
+                    para = doc.add_paragraph()
+                    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = para.add_run()
+                    run.add_picture(str(abs_path), width=Inches(5.5))
+                except Exception:
+                    p = doc.add_paragraph()
+                    r = p.add_run(f"[图片：{img_match.group(1)}]")
+                    _set_run_font(r, color=RGBColor(0x99, 0x99, 0x99))
+            else:
+                p = doc.add_paragraph()
+                r = p.add_run(f"[图片：{img_match.group(1)}]")
+                _set_run_font(r, color=RGBColor(0x99, 0x99, 0x99))
+            i += 1
+            continue
 
         # 表格
         if "|" in line:
@@ -61,7 +260,7 @@ def _render_markdown_to_docx(doc: DocxDocument, content: str):
                     i += 1
                     continue
                 cells = [c.strip() for c in stripped.split("|") if c.strip() is not None]
-                cells = [c for c in cells if c]  # 过滤空单元格
+                cells = [c for c in cells if c]
                 if cells:
                     rows.append(cells)
                 i += 1
@@ -73,8 +272,19 @@ def _render_markdown_to_docx(doc: DocxDocument, content: str):
                         cell = tbl.rows[ri].cells[ci]
                         cell.text = cell_text
                         for p in cell.paragraphs:
+                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             for run in p.runs:
-                                _set_run_font(run)
+                                _set_run_font(run, size_pt=10)
+                    # 表头样式：加粗 + 灰底
+                    if ri == 0:
+                        for cell in tbl.rows[0].cells:
+                            for p in cell.paragraphs:
+                                for run in p.runs:
+                                    run.font.bold = True
+                            shading = OxmlElement('w:shd')
+                            shading.set(qn('w:fill'), 'D9E2F3')
+                            shading.set(qn('w:val'), 'clear')
+                            cell._tc.get_or_add_tcPr().append(shading)
             continue
 
         # 列表
@@ -121,9 +331,16 @@ def _render_markdown_to_docx(doc: DocxDocument, content: str):
 
 
 def _docx_from_markdown(content: str, title: str = "投标标书") -> DocxDocument:
-    """将 markdown 字符串转为 docx Document 对象"""
+    """将 markdown 字符串转为专业排版的 docx Document 对象"""
+    from server.config import get_settings as _get_settings
+    _settings = _get_settings()
+    company_name = _settings.COMPANY_NAME or "投标单位名称"
+    date_str = datetime.now().strftime("%Y 年 %m 月 %d 日")
     doc = DocxDocument()
-    doc.add_heading(title, 0)
+    _setup_styles(doc)
+    _add_cover_page(doc, title, company_name, date_str)
+    _add_toc(doc)
+    _setup_header_footer(doc, title)
     _render_markdown_to_docx(doc, content)
     return doc
 
@@ -134,7 +351,7 @@ from server.core.generator.llm import get_generator
 from server.core.reviewer import review_bid, _check_format_compliance
 from server.tools.violation_checker import get_violation_checker
 from server.tools.plagiarism_checker import get_plagiarism_checker
-from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, Resp
+from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, BidTemplateCreateReq, BidTemplateUpdateReq, Resp
 
 router = APIRouter(prefix="/api/bid", tags=["标书生成"])
 settings = get_settings()
@@ -363,17 +580,44 @@ def parse_bid_file(req: BidParseReq):
                 req0 = requirements[0] if requirements else ""
                 if project_name and req0:
                     query = f"{project_name} {req0}"
-                    chunks = retrieve(query, top_k=3)
-                    doc_ids_seen = set()
+                    chunks = retrieve(query, top_k=5)
+                    doc_groups = {}
                     for chunk in chunks:
                         doc_id = chunk.get("doc_id")
-                        if doc_id and doc_id not in doc_ids_seen:
-                            doc_ids_seen.add(doc_id)
-                            recommended_materials.append({
+                        if not doc_id:
+                            continue
+                        if doc_id not in doc_groups:
+                            doc_groups[doc_id] = {
                                 "id": doc_id,
                                 "filename": chunk.get("filename", ""),
-                                "relevance_score": round(chunk.get("score", 0.0), 2)
-                            })
+                                "scores": [],
+                                "chunks": [],
+                            }
+                        doc_groups[doc_id]["scores"].append(chunk.get("score", 0.0))
+                        if len(doc_groups[doc_id]["chunks"]) < 2:
+                            doc_groups[doc_id]["chunks"].append(chunk.get("text", "")[:200])
+
+                    for doc_id, group in doc_groups.items():
+                        avg_score = sum(group["scores"]) / len(group["scores"]) if group["scores"] else 0
+                        # 用匹配到的关键词片段生成推荐理由
+                        query_keywords = [w for w in query.split() if len(w) > 1]
+                        matched_keywords = []
+                        for c in group["chunks"]:
+                            for kw in query_keywords:
+                                if kw in c:
+                                    matched_keywords.append(kw)
+                                    break
+                        reason = f"匹配项目：{', '.join(matched_keywords[:3])}" if matched_keywords else "内容相似"
+                        recommended_materials.append({
+                            "id": doc_id,
+                            "filename": group["filename"],
+                            "relevance_score": round(avg_score, 2),
+                            "relevance_reason": reason,
+                            "matched_count": len(group["scores"]),
+                            "matched_excerpts": group["chunks"],
+                        })
+                    # 按相关度降序
+                    recommended_materials.sort(key=lambda m: m["relevance_score"], reverse=True)
             except Exception:
                 pass
 
@@ -442,6 +686,26 @@ def _format_scoring(scoring: dict) -> str:
 @router.post("/plan", response_model=BidPlanResp)
 def plan_bid(req: BidPlanReq):
     """生成标书目录大纲（规划阶段）"""
+
+    # 如果指定了模板，直接返回模板定义的章节
+    if req.template_id:
+        import json
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT chapters FROM bid_templates WHERE id = ?", (req.template_id,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            try:
+                chapters_data = json.loads(row["chapters"])
+                chapters_with_status = [
+                    {"index": idx, "name": ch.get("name", ""), "description": ch.get("description", ""), "status": "pending", "key_points": ch.get("key_points", "")}
+                    for idx, ch in enumerate(chapters_data)
+                ]
+                return BidPlanResp(chapters=chapters_with_status)
+            except (json.JSONDecodeError, KeyError):
+                pass  # 模板数据异常，降级到 LLM 生成
+
     generator = get_generator()
 
     # 检索相关素材摘要
@@ -883,6 +1147,44 @@ def download_bid(filename: str):
     return FileResponse(str(path), filename=filename, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 
+@router.get("/recommend/{doc_id}/preview")
+def recommend_preview(doc_id: int):
+    """获取素材的章节级预览，展示匹配到的切片内容"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT filename, id FROM documents WHERE id = ?", (doc_id,))
+    doc = cur.fetchone()
+    if not doc:
+        conn.close()
+        raise HTTPException(status_code=404, detail="文档不存在")
+    cur.execute("""
+        SELECT text, metadata, chunk_index FROM chunks
+        WHERE doc_id = ? ORDER BY chunk_index ASC LIMIT 20
+    """, (doc_id,))
+    chunks = cur.fetchall()
+    conn.close()
+    sections = []
+    for ch in chunks:
+        meta = {}
+        try:
+            import json
+            meta = json.loads(ch["metadata"])
+        except Exception:
+            pass
+        sections.append({
+            "index": ch["chunk_index"],
+            "text": ch["text"][:500],
+            "section_name": meta.get("section_name", ""),
+            "section_type": meta.get("section_type", ""),
+        })
+    return {
+        "id": doc_id,
+        "filename": doc["filename"],
+        "section_count": len(sections),
+        "sections": sections,
+    }
+
+
 @router.post("/analyze-old/{doc_id}")
 def analyze_old_bid(doc_id: int):
     """拆解历史投标标书为结构化章节并存入向量库"""
@@ -1114,6 +1416,205 @@ def restore_bid_version(version_id: int):
         "project_name": version.get("project_name", ""),
         "version_id": version_id,
     }
+
+
+# ── 标书模板库 CRUD ──────────────────────────────────────────────────────────
+
+
+@router.get("/templates")
+def list_templates(category: Optional[str] = None):
+    """获取标书模板列表，可按分类筛选"""
+    conn = get_db()
+    cur = conn.cursor()
+    if category:
+        cur.execute(
+            """SELECT id, name, category, industry, description, chapters, default_strategy,
+                      is_builtin, created_at, updated_at
+               FROM bid_templates WHERE category = ?
+               ORDER BY is_builtin DESC, id ASC""",
+            (category,)
+        )
+    else:
+        cur.execute(
+            """SELECT id, name, category, industry, description, chapters, default_strategy,
+                      is_builtin, created_at, updated_at
+               FROM bid_templates
+               ORDER BY is_builtin DESC, id ASC"""
+        )
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["chapters"] = json.loads(d["chapters"])
+        except (json.JSONDecodeError, TypeError):
+            d["chapters"] = []
+        result.append(d)
+    return {"templates": result}
+
+
+@router.get("/templates/{template_id}")
+def get_template(template_id: int):
+    """获取单个模板详情"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, name, category, industry, description, chapters, default_strategy,
+                  is_builtin, created_at, updated_at
+           FROM bid_templates WHERE id = ?""",
+        (template_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    d = dict(row)
+    try:
+        d["chapters"] = json.loads(d["chapters"])
+    except (json.JSONDecodeError, TypeError):
+        d["chapters"] = []
+    return d
+
+
+@router.post("/templates")
+def create_template(req: BidTemplateCreateReq):
+    """创建自定义模板"""
+    conn = get_db()
+    cur = conn.cursor()
+    chapters_json = json.dumps([ch.model_dump() if hasattr(ch, 'model_dump') else ch for ch in req.chapters], ensure_ascii=False)
+    cur.execute(
+        """INSERT INTO bid_templates (name, category, industry, description, chapters, default_strategy, is_builtin)
+           VALUES (?, ?, ?, ?, ?, ?, 0)""",
+        (req.name, req.category, req.industry, req.description, chapters_json, req.default_strategy)
+    )
+    conn.commit()
+    template_id = cur.lastrowid
+    conn.close()
+    return {"id": template_id, "message": "模板创建成功"}
+
+
+@router.put("/templates/{template_id}")
+def update_template(template_id: int, req: BidTemplateUpdateReq):
+    """更新自定义模板"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM bid_templates WHERE id = ? AND is_builtin = 0", (template_id,))
+    if not cur.fetchone():
+        raise HTTPException(status_code=403, detail="内置模板不可修改")
+
+    fields = []
+    values = []
+    if req.name is not None:
+        fields.append("name = ?")
+        values.append(req.name)
+    if req.category is not None:
+        fields.append("category = ?")
+        values.append(req.category)
+    if req.industry is not None:
+        fields.append("industry = ?")
+        values.append(req.industry)
+    if req.description is not None:
+        fields.append("description = ?")
+        values.append(req.description)
+    if req.chapters is not None:
+        chapters_json = json.dumps([ch.model_dump() if hasattr(ch, 'model_dump') else ch for ch in req.chapters], ensure_ascii=False)
+        fields.append("chapters = ?")
+        values.append(chapters_json)
+    if req.default_strategy is not None:
+        fields.append("default_strategy = ?")
+        values.append(req.default_strategy)
+
+    if not fields:
+        return {"message": "无变更"}
+
+    fields.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(template_id)
+    cur.execute(
+        f"UPDATE bid_templates SET {', '.join(fields)} WHERE id = ?",
+        values
+    )
+    conn.commit()
+    conn.close()
+    return {"message": "模板更新成功"}
+
+
+@router.delete("/templates/{template_id}")
+def delete_template(template_id: int):
+    """删除自定义模板"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM bid_templates WHERE id = ? AND is_builtin = 0", (template_id,))
+    if not cur.fetchone():
+        raise HTTPException(status_code=403, detail="内置模板不可删除")
+    cur.execute("DELETE FROM bid_templates WHERE id = ?", (template_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "模板已删除"}
+
+
+def _init_builtin_templates():
+    """初始化内置模板（仅在首次启动时写入）"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM bid_templates WHERE is_builtin = 1")
+    count = cur.fetchone()[0]
+    if count > 0:
+        conn.close()
+        return
+
+    templates = [
+        {
+            "name": "设备采购技术标",
+            "category": "设备采购技术标",
+            "industry": "石油石化/钢管管件",
+            "description": "适用于钢管管件等物资采购项目的技术投标文件，覆盖资质、技术方案、质量标准和售后服务等核心章节",
+            "default_strategy": "技术优先型",
+            "chapters": [
+                {"name": "投标函", "description": "投标总报价、交货期承诺、质量承诺、投标有效期等", "key_points": "报价有效期通常为90天，交货期承诺需满足招标要求"},
+                {"name": "法定代表人身份证明及授权委托书", "description": "法定代表人身份证明、授权委托书及被授权人身份证明", "key_points": "需加盖公章，授权委托书需明确授权范围"},
+                {"name": "投标人资格审查资料", "description": "营业执照、特种设备制造许可证（压力管道元件）、API认证、ISO体系证书等", "key_points": "证书需在有效期内，覆盖招标范围"},
+                {"name": "企业概况与业绩", "description": "公司简介、生产能力、近三年石油石化行业供货业绩（含合同复印件）", "key_points": "业绩合同需提供关键页，金额和型号清晰可见"},
+                {"name": "技术方案", "description": "生产工艺流程、关键工序质量控制、技术路线说明", "key_points": "突出钢管管件生产工艺优势，从原材料到成品全过程描述"},
+                {"name": "产品技术参数响应", "description": "按招标文件技术要求逐条响应，涵盖材质、壁厚、公差、防腐层等", "key_points": "逐条对应招标技术规格书，标注符合/优于/偏离"},
+                {"name": "质量标准与检测", "description": "执行标准、出厂检验项目、第三方检测报告、质量保证期", "key_points": "列出执行的国标/行标/企标清单"},
+                {"name": "生产进度与交货计划", "description": "生产排产计划表、产能保障措施", "key_points": "需有具体时间节点和产能数据支撑"},
+                {"name": "包装运输方案", "description": "包装标准、管端保护方式、运输方案、货物追踪", "key_points": "钢管管件包装需符合石油行业运输要求"},
+                {"name": "售后服务承诺", "description": "质保期服务、现场技术支持、响应时间", "key_points": "中石油项目通常要求24小时响应"},
+                {"name": "近年财务状况", "description": "近三年资产负债表、利润表、银行资信证明", "key_points": "财务状况需良好，资产负债率通常要求低于70%"},
+                {"name": "其他证明材料", "description": "信用中国报告、纳税证明、社保记录、无行贿记录证明", "key_points": "信用报告需为近一个月内查询结果"}
+            ]
+        },
+        {
+            "name": "设备采购商务标",
+            "category": "设备采购商务标",
+            "industry": "石油石化/钢管管件",
+            "description": "适用于钢管管件等物资采购项目的商务投标文件，重点覆盖报价明细和商务条款响应",
+            "default_strategy": "成本控制型",
+            "chapters": [
+                {"name": "投标函", "description": "投标总价、分项报价汇总、增值税率、投标有效期", "key_points": "大小写金额必须一致，税率按最新政策填写"},
+                {"name": "法定代表人授权委托书", "description": "授权委托书、被授权人身份证明", "key_points": "需附被授权人身份证复印件并加盖公章"},
+                {"name": "分项报价表", "description": "按规格逐项报价，含规格、材质、数量、单价、总价、防腐加工费", "key_points": "逐项填写，合计总价与投标函一致"},
+                {"name": "价格构成分析", "description": "原材料成本、加工费、管理费、利润、运费的明细构成", "key_points": "分析合理，避免畸高畸低引起评委质疑"},
+                {"name": "商务条款响应", "description": "对付款方式、履约保证金、质保金、发票类型等逐条响应", "key_points": "偏离项需在偏离表中说明"},
+                {"name": "投标保证金", "description": "保证金缴纳凭证（银行保函或电汇回单）", "key_points": "金额和有效期需满足招标文件要求"},
+                {"name": "制造商授权书", "description": "代理商投标时需提供制造商针对本项目的唯一授权", "key_points": "仅代理商投标时需要"},
+                {"name": "近年审计报告", "description": "经审计的财务报告关键页", "key_points": "需加盖审计机构印章"},
+                {"name": "偏离表", "description": "技术/商务偏离说明", "key_points": "无偏离请填写'无偏离'"}
+            ]
+        }
+    ]
+
+    for t in templates:
+        chapters_json = json.dumps(t["chapters"], ensure_ascii=False)
+        cur.execute(
+            """INSERT INTO bid_templates (name, category, industry, description, chapters, default_strategy, is_builtin)
+               VALUES (?, ?, ?, ?, ?, ?, 1)""",
+            (t["name"], t["category"], t["industry"], t["description"], chapters_json, t["default_strategy"])
+        )
+    conn.commit()
+    conn.close()
+    print(f"[Templates] 已初始化 {len(templates)} 套内置模板")
 
 
 def _save_bid_version(

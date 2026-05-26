@@ -19,6 +19,7 @@ const routes = [
       { path: "chat", name: "RAGChat", component: () => import("../pages/RAGChat.vue") },
       { path: "bid", name: "BidGenerate", component: () => import("../pages/BidGenerate.vue") },
       { path: "bid-analyze", name: "BidAnalyze", component: () => import("../pages/BidAnalyze.vue") },
+      { path: "price", name: "PriceAnalyze", component: () => import("../pages/PriceAnalyze.vue") },
       { path: "settings", name: "Settings", component: () => import("../pages/Settings.vue") },
     ]
   }

@@ -69,7 +69,8 @@ import { ref, computed } from "vue"
 import { useRouter, useRoute } from "vue-router"
 import { useAuthStore } from "../stores/auth"
 import {
-  Odometer, Document, ChatDotRound, Files, DataBoard, Setting, User, SwitchButton, QuestionFilled
+  Odometer, Document, Files, DataBoard, Setting, User, SwitchButton, QuestionFilled, Money,
+  ChatLineSquare
 } from "@element-plus/icons-vue"
 
 const router = useRouter()
@@ -81,8 +82,9 @@ const navItems = [
   { path: "/dashboard", label: "仪表盘", icon: Odometer },
   { path: "/bid-analyze", label: "标书解析", icon: DataBoard },
   { path: "/bid", label: "标书生成", icon: Files },
+  { path: "/price", label: "报价分析", icon: Money },
   { path: "/kb", label: "知识库", icon: Document },
-  { path: "/chat", label: "RAG 问答", icon: ChatDotRound },
+  { path: "/chat", label: "RAG 问答", icon: ChatLineSquare },
   { path: "/settings", label: "系统设置", icon: Setting },
 ]
 

@@ -95,6 +95,10 @@ const messages = ref([])
 const loading = ref(false)
 const messagesEl = ref()
 
+const _apiBase = import.meta.env.DEV
+  ? ""
+  : (import.meta.env.VITE_API_URL || "http://localhost:8000")
+
 async function send() {
   if (!question.value.trim() || loading.value) return
   const q = question.value.trim()
@@ -102,15 +106,61 @@ async function send() {
   messages.value.push({ role: "user", content: q })
   scrollBottom()
   loading.value = true
+
+  // 插入占位消息，流式更新
+  const msgIdx = messages.value.length
+  messages.value.push({ role: "assistant", content: "", sources: [] })
+
   try {
-    const resp = await api.post("/api/rag/query", { question: q, top_k: 5 })
-    messages.value.push({
-      role: "assistant",
-      content: resp.data.answer,
-      sources: resp.data.sources
+    const resp = await fetch(`${_apiBase}/api/rag/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: q, top_k: 5, stream: true }),
     })
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || ""
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue
+        const payload = line.slice(6)
+        if (payload === "[DONE]") continue
+
+        try {
+          const parsed = JSON.parse(payload)
+          if (parsed.type === "sources") {
+            messages.value[msgIdx].sources = parsed.content
+          } else if (parsed.type === "text") {
+            messages.value[msgIdx].content += parsed.content
+            scrollBottom()
+          }
+        } catch {
+          // 跳过畸形 JSON
+        }
+      }
+    }
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || "请求失败")
+    // 流式失败，降级为非流式
+    try {
+      const resp = await api.post("/api/rag/query", { question: q, top_k: 5 })
+      messages.value[msgIdx] = {
+        role: "assistant",
+        content: resp.data.answer,
+        sources: resp.data.sources,
+      }
+    } catch (e2) {
+      ElMessage.error(e2.response?.data?.detail || "请求失败")
+      messages.value.splice(msgIdx, 1)
+    }
   } finally {
     loading.value = false
     scrollBottom()

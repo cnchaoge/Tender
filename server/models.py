@@ -64,6 +64,38 @@ class QueryResp(BaseModel):
     sources: List[dict]  # [{doc_id, filename, chunk_index, text, score}]
 
 
+# ============ 标书模板 ============
+class BidTemplate(BaseModel):
+    id: int
+    name: str
+    category: str
+    industry: str = ""
+    description: str = ""
+    chapters: List[dict]  # [{name, description, weight, key_points}]
+    default_strategy: str = "综合均衡型"
+    is_builtin: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class BidTemplateCreateReq(BaseModel):
+    name: str
+    category: str
+    industry: str = ""
+    description: str = ""
+    chapters: List[dict]
+    default_strategy: str = "综合均衡型"
+
+
+class BidTemplateUpdateReq(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    industry: Optional[str] = None
+    description: Optional[str] = None
+    chapters: Optional[List[dict]] = None
+    default_strategy: Optional[str] = None
+
+
 # ============ 标书 ============
 class BidParseReq(BaseModel):
     file_path: str  # 已在服务端的文件路径
@@ -112,6 +144,7 @@ class BidMatchCheckReq(BaseModel):
 class BidPlanReq(BaseModel):
     parse_result: dict  # BidParseResp 结果
     materials: List[int]  # 素材文档 ID 列表
+    template_id: Optional[int] = None  # 可选模板 ID
 
 
 class BidPlanResp(BaseModel):

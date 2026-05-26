@@ -2,9 +2,6 @@
 
 **制造业投标标书 AI 助手 — 本地部署，开箱即用**
 
-[![Stars](https://img.shields.io/github/stars/cnchaoge/tender?style=flat-square)](https://github.com/cnchaoge/tender)
-[![License](https://img.shields.io/github/license/cnchaoge/tender?style=flat-square)](./LICENSE)
-
 ---
 
 ## 🎯 解决什么问题
@@ -26,6 +23,11 @@
 | 📄 **知识库管理** | 上传产品资料（PDF/Word/Excel），AI 自动理解内容 |
 | 💬 **RAG 智能问答** | 基于文档内容的精准问答检索 |
 | 📋 **投标标书生成** | 选择模板 + 补充信息 = 生成专业投标文件 |
+| 📑 **专业排版导出** | 封面、目录、页眉页脚、标题样式自动排版 |
+| 💰 **报价分析计算器** | 根据评分公式计算最优报价，多策略对比 |
+| ✅ **投标材料检查清单** | 自动生成盖章签字材料清单，防废标 |
+| 🔍 **历史标书智能推荐** | 自动匹配知识库中最相似的章节供参考 |
+| 📚 **内置招投标词汇表** | 44 条行业术语，提升 AI 理解准确度 |
 
 ---
 
@@ -55,40 +57,40 @@ pip install -r requirements.txt
 
 ### 2. 配置 AI 模型
 
-创建 `.env` 文件：
+创建 `.env` 文件（已提供模板），配置 LLM_PROVIDER 和 API Key，或使用本地 Ollama：
 
 ```env
+# 云端方案（选一）
 DEEPSEEK_API_KEY=your_api_key
 LLM_PROVIDER=deepseek
-EMBED_PROVIDER=deepseek
-SECRET_KEY=your-secret-key
+
+# 或本地 Ollama（无需 API Key）
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen3:4b
 ```
 
 ### 3. 启动服务
 
 ```bash
-cd server
-uvicorn main:app --reload --port 8000
+python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
 ```
 
 ### 4. 打开浏览器
 
-- 控制台：http://localhost:8000/web
+- 访问 http://localhost:8000
 - 默认账号：`admin` / `admin123`
 
 ---
 
 ## 🖥️ 部署方式
 
-支持 **Windows** 和 **Linux** 双系统，无需 Docker。
-
-离线网络环境也可交付，依赖可打包本地安装。
+支持 **Windows** 和 **Linux** 双系统，无需 Docker。离线网络环境也可交付。
 
 ---
 
 ## 🏭 适用场景
 
-- 管道管件行业投标
+- 管道管件行业投标（中石油/中石化/中海油）
 - 体育器材制造商
 - 机床附件供应商
 - 其他制造业中小型企业
@@ -100,14 +102,16 @@ uvicorn main:app --reload --port 8000
 ```
 Tender/
 ├── server/              # FastAPI 后端
-│   ├── api/             # API 路由（管理/知识库/标书）
-│   ├── core/            # 核心配置
-│   └── services/        # AI 服务层（RAG/标书生成）
+│   ├── api/             # API 路由
+│   ├── core/            # 核心服务（RAG/嵌入/分词/质检）
+│   ├── data/            # 内置数据（词汇表）
+│   └── db/              # 数据库（SQLite + ChromaDB）
 ├── web/                 # Vue3 前端
 │   └── src/
-│       ├── pages/       # 页面（登录/仪表盘/知识库/问答/标书）
-│       └── assets/      # 样式（Linear Light 主题）
-├── docs/                # 文档
+│       ├── pages/       # 页面
+│       ├── components/  # 组件
+│       └── api/         # API 调用层
+├── docs/                # 使用说明文档
 └── requirements.txt     # Python 依赖
 ```
 
@@ -120,18 +124,8 @@ Tender/
 | 后端 | Python FastAPI | 高性能异步 API |
 | 前端 | Vue3 + Element Plus | 线性浅色主题 |
 | 向量库 | ChromaDB | 本地嵌入式向量检索 |
-| AI 模型 | DeepSeek / 通义 / 智谱 | 按需配置 |
+| AI 模型 | DeepSeek / Ollama / 通义 | 按需配置，支持本地 |
 | 数据库 | SQLite | 零运维，轻量 |
-| 部署 | 双系统原生运行 | 无需 Docker |
-
----
-
-## 🔮 后续方向
-
-- 📊 质检报告自动生成
-- 🔧 设备台账管理系统
-- 📱 移动端支持
-- 🤖 更多 AI 模型适配
 
 ---
 

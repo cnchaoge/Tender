@@ -10,7 +10,7 @@ from functools import lru_cache
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     BASE_DIR = Path(sys.executable).parent
 else:
-    BASE_DIR = Path(__file__).resolve().parent.parent.parent
+    BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
 
     # AI Model
-    LLM_PROVIDER: str = "dashscope"  # dashscope | openai | minimax | deepseek
+    LLM_PROVIDER: str = "ollama"  # ollama | dashscope | openai | minimax | deepseek
     DASHSCOPE_API_KEY: str = ""
     DASHSCOPE_MODEL: str = "qwen-turbo"
     OPENAI_API_KEY: str = ""
@@ -46,14 +46,22 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_MODEL: str = "deepseek-chat"
 
+    # Ollama (Local LLM)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen2.5:3b"
+    OLLAMA_EMBED_MODEL: str = ""
+
     # Embedding
-    EMBED_PROVIDER: str = "mock"  # dashscope | bge | m3e | mock
+    EMBED_PROVIDER: str = "ollama"  # ollama | dashscope | bge | m3e | mock
     DASHSCOPE_EMBED_MODEL: str = "text-embedding-v3"
     BGE_MODEL_PATH: str = ""
     M3E_MODEL_PATH: str = "moka-ai/m3e-base"
 
     # ChromaDB
     CHROMA_PERSIST_DIR: str = str(DATA_DIR / "chromadb")
+
+    # 企业信息
+    COMPANY_NAME: str = "投标单位名称"
 
     # File size limit (MB)
     MAX_FILE_SIZE: int = 50

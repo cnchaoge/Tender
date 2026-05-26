@@ -2,22 +2,34 @@
 Tender - 管理后台 API（统一配置 + 用户管理）
 """
 import os
-import signal
 import sys
+import subprocess
+import threading
+import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from server.db.sqlite import get_db
 from server.config import get_settings, update_env
 
-# ============ 热重启信号处理 ============
-def _hot_restart(signum, frame):
-    """收到 SIGTERM 后用 os.execl 原地替换进程，实现零停机重启"""
+# ============ 热重启 ============
+def _do_restart():
+    """用辅助脚本启动新进程，辅助脚本会延迟等旧进程释放端口后再启动"""
     python = sys.executable
-    os.execl(python, python, "-m", "uvicorn", "server.main:app",
-             "--host", "0.0.0.0", "--port", "8000")
+    settings = get_settings()
+    helper = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "restart_helper.py")
+    try:
+        subprocess.Popen(
+            [python, helper, "3", settings.HOST, str(settings.PORT)],
+        )
+    except Exception as e:
+        print(f"[Restart] 启动辅助脚本失败: {e}")
+    os._exit(0)
 
-signal.signal(signal.SIGTERM, _hot_restart)
+def restart_server_async():
+    """在后台线程执行重启"""
+    t = threading.Thread(target=_do_restart, daemon=True)
+    t.start()
 from server.models import Resp
 
 router = APIRouter(prefix="/api/admin", tags=["管理后台"])
@@ -28,10 +40,11 @@ settings = get_settings()
 # ============ 请求/响应模型 ============
 
 class ModelConfigReq(BaseModel):
-    provider: str = "dashscope"  # dashscope | deepseek
+    provider: str = "dashscope"  # dashscope | deepseek | ollama
     api_key: str = ""
     model: str = ""
-    embed_provider: str = ""  # dashscope | bge | m3e | mock
+    embed_provider: str = ""  # dashscope | bge | m3e | ollama | mock
+    ollama_embed_model: str = ""  # bge-m3 | nomic-embed-text
 
 
 class ModelConfigResp(BaseModel):
@@ -42,6 +55,8 @@ class ModelConfigResp(BaseModel):
 class SystemConfig(BaseModel):
     """System config (no sensitive info)"""
     llm_provider: str
+    ollama_model: str
+    ollama_embed_model: str
     dashscope_model: str
     deepseek_model: str
     embed_provider: str
@@ -151,6 +166,8 @@ def get_config():
     s = get_settings()
     return SystemConfig(
         llm_provider=s.LLM_PROVIDER,
+        ollama_model=s.OLLAMA_MODEL,
+        ollama_embed_model=s.OLLAMA_EMBED_MODEL or s.OLLAMA_MODEL,
         dashscope_model=s.DASHSCOPE_MODEL,
         deepseek_model=s.DEEPSEEK_MODEL,
         embed_provider=s.EMBED_PROVIDER,
@@ -180,6 +197,20 @@ def verify_model_config(body: ModelConfigReq):
         except Exception as e:
             return ModelConfigResp(valid=False, message=f"验证异常: {str(e)}")
 
+    elif body.provider == "ollama":
+        try:
+            import httpx
+            base_url = get_settings().OLLAMA_BASE_URL.rstrip("/")
+            resp = httpx.get(f"{base_url}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                models = resp.json().get("models", [])
+                model_names = [m["name"] for m in models]
+                return ModelConfigResp(valid=True, message=f"Ollama 连接成功，可用模型: {', '.join(model_names)}")
+            else:
+                return ModelConfigResp(valid=False, message=f"Ollama 连接失败: {resp.status_code}")
+        except Exception as e:
+            return ModelConfigResp(valid=False, message=f"Ollama 连接失败: {str(e)}")
+
     else:  # dashscope
         import dashscope
         dashscope.api_key = body.api_key
@@ -205,11 +236,33 @@ def save_model_config(body: ModelConfigReq):
         update_env("LLM_PROVIDER", "deepseek")
         update_env("DEEPSEEK_API_KEY", body.api_key)
         update_env("DEEPSEEK_MODEL", body.model or "deepseek-chat")
+    elif body.provider == "ollama":
+        update_env("LLM_PROVIDER", "ollama")
+        if body.model:
+            update_env("OLLAMA_MODEL", body.model)
     else:
         update_env("LLM_PROVIDER", "dashscope")
         update_env("DASHSCOPE_API_KEY", body.api_key)
         update_env("DASHSCOPE_MODEL", body.model or "qwen-turbo")
     return Resp(message="配置已保存，需重启服务生效")
+
+
+# ============ Ollama 模型列表 ============
+
+@router.get("/ollama/models", response_model=list)
+def list_ollama_models():
+    """从 Ollama 获取可用的模型列表"""
+    import httpx
+    try:
+        base_url = get_settings().OLLAMA_BASE_URL.rstrip("/")
+        resp = httpx.get(f"{base_url}/api/tags", timeout=5)
+        if resp.status_code != 200:
+            return []
+        models = resp.json().get("models", [])
+        # 返回模型名列表
+        return sorted([m["name"] for m in models])
+    except Exception:
+        return []
 
 
 # ============ Embedding 模型配置 ============
@@ -219,14 +272,15 @@ def save_embed_config(body: ModelConfigReq):
     """保存 Embedding 模型配置到 .env"""
     if body.embed_provider:
         update_env("EMBED_PROVIDER", body.embed_provider)
+    if body.ollama_embed_model:
+        update_env("OLLAMA_EMBED_MODEL", body.ollama_embed_model)
     return Resp(message="Embedding 配置已保存，需重启服务生效")
 
 
 # ============ 服务重启 ============
 
-@router.post("/restart", response_model=Resp)
+@router.post("/restart")
 def restart_server():
-    """重启后端服务（热重启，不中断）"""
-    pid = os.getpid()
-    os.kill(pid, signal.SIGTERM)
-    return Resp(message="服务重启中")
+    """重启后端服务"""
+    restart_server_async()
+    return {"message": "服务重启中，请等待页面刷新"}

@@ -40,7 +40,6 @@ const kb = {
 // ── RAG 问答 ──────────────────────────────────────────────────────────────────
 const rag = {
   query: (question, top_k, stream) => http.post("/api/rag/query", { question, top_k, stream }),
-  chat: (messages) => http.post("/api/rag/chat", { messages }),
 }
 
 // ── 标书生成 ──────────────────────────────────────────────────────────────────
@@ -60,6 +59,7 @@ const bid = {
   },
   matchCheck: (parseResult, materials) =>
     http.post("/api/bid/match_check", { parse_result: parseResult, materials }),
+  recommendPreview: (docId) => http.get(`/api/bid/recommend/${docId}/preview`),
   analyzeOld: (docId) => http.post(`/api/bid/analyze-old/${docId}`),
   analyzeOldSections: (docId) => http.get(`/api/bid/analyze-old/${docId}/sections`),
   violationCheck: (payload) => http.post("/api/bid/violation_check", payload),
@@ -67,6 +67,34 @@ const bid = {
   getViolationCases: (category) => http.get("/api/bid/violation_cases", { params: { category } }),
   plagiarismCheck: (bidContent, excludeDocIds) =>
     http.post("/api/bid/plagiarism_check", { bid_content: bidContent, exclude_doc_ids: excludeDocIds }),
+}
+
+// ── 报价分析 ──────────────────────────────────────────────────────────────────
+const price = {
+  parseFormula: (scoring, rawText) => http.post("/api/price/parse-formula", { scoring, raw_text: rawText }),
+  calculate: (formulaJson, costPrice, competitorCount) =>
+    http.post("/api/price/calculate", { formula_json: formulaJson, cost_price: costPrice, competitor_count: competitorCount }),
+  save: (data) => http.post("/api/price/save", data),
+  history: (limit) => http.get("/api/price/history", { params: { limit } }),
+  historyDetail: (id) => http.get(`/api/price/history/${id}`),
+  deleteHistory: (id) => http.delete(`/api/price/history/${id}`),
+  formulaTemplates: () => http.get("/api/price/formula-templates"),
+}
+
+// ── 检查清单 ──────────────────────────────────────────────────────────────────
+const checklist = {
+  generate: (bidVersionId, bidContent, parseResult) =>
+    http.post("/api/checklist/generate", {
+      bid_version_id: bidVersionId,
+      bid_content: bidContent,
+      parse_result: parseResult,
+    }),
+  get: (bidVersionId) => http.get(`/api/checklist/${bidVersionId}`),
+  updateItem: (itemId, data) => http.put(`/api/checklist/item/${itemId}`, data),
+  addItem: (data) => http.post("/api/checklist/item", data),
+  deleteItem: (itemId) => http.delete(`/api/checklist/item/${itemId}`),
+  exportData: (bidVersionId) => http.get(`/api/checklist/export/${bidVersionId}`),
+  categories: () => http.get("/api/checklist/categories"),
 }
 
 // ── 管理后台 ──────────────────────────────────────────────────────────────────
@@ -86,4 +114,4 @@ const admin = {
 const api = http
 
 export default api  // 必须是 axios 实例本身，不能是包含 api 的对象
-export { http, api, auth, kb, rag, bid, admin }
+export { http, api, auth, kb, rag, bid, admin, price, checklist }

@@ -90,6 +90,51 @@ def init_db():
         )
     """)
 
+    # 报价分析记录
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS price_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL DEFAULT '',
+            formula_json TEXT NOT NULL DEFAULT '{}',
+            cost_price REAL NOT NULL DEFAULT 0,
+            suggested_price REAL,
+            calculated_results TEXT NOT NULL DEFAULT '{}',
+            strategy_scores TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+    """)
+
+    # 投标材料检查清单
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS checklist_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bid_version_id INTEGER NOT NULL DEFAULT 0,
+            category TEXT NOT NULL DEFAULT '其他',
+            item TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '待准备',
+            remark TEXT DEFAULT '',
+            source TEXT DEFAULT 'auto',
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+    """)
+
+    # 标书模板库
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bid_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            industry TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            chapters TEXT NOT NULL,
+            default_strategy TEXT DEFAULT '综合均衡型',
+            is_builtin INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # 默认管理员账号 admin / admin123
     from passlib.context import CryptContext
     pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
