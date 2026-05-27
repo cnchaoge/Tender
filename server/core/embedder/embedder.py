@@ -2,7 +2,7 @@
 Tender - Embedding 模型
 支持 通义 / BGE
 """
-from server.config import get_settings, BASE_DIR
+from server.config import get_settings
 
 settings = get_settings()
 
@@ -10,13 +10,10 @@ settings = get_settings()
 def get_embedder():
     """根据配置返回 Embedding 实例"""
     provider = settings.EMBED_PROVIDER
-    try:
-        with open(BASE_DIR / "embedder_debug.txt", "a", encoding="utf-8") as f:
-            f.write(f"EMBED_PROVIDER={provider!r}, BASE_DIR={BASE_DIR!r}\n")
-    except Exception:
-        pass
 
-    if provider == "dashscope":
+    if provider == "ollama":
+        return OllamaEmbedder()
+    elif provider == "dashscope":
         return DashScopeEmbedder()
     elif provider == "bge":
         return BGEEmbedder()
@@ -25,7 +22,7 @@ def get_embedder():
     elif provider == "mock":
         return MockEmbedder()
     else:
-        raise ValueError(f"未知的 Embedding provider: {provider}，支持 dashscope / bge / m3e / mock")
+        raise ValueError(f"未知的 Embedding provider: {provider}，支持 ollama / dashscope / bge / m3e / mock")
 
 
 class DashScopeEmbedder:
@@ -84,6 +81,33 @@ class M3EEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [emb.tolist() if hasattr(emb, 'tolist') else emb for emb in self._encode(texts)]
+
+    def embed_one(self, text: str) -> list[float]:
+        return self.embed([text])[0]
+
+
+class OllamaEmbedder:
+    """Ollama 本地 Embedding（通过 Ollama API 调用）"""
+
+    def __init__(self):
+        import httpx
+        self.base_url = settings.OLLAMA_BASE_URL.rstrip("/")
+        self.model = settings.OLLAMA_EMBED_MODEL or settings.OLLAMA_MODEL
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        import httpx
+        results = []
+        for text in texts:
+            resp = httpx.post(
+                f"{self.base_url}/api/embed",
+                json={"model": self.model, "input": text},
+                timeout=60
+            )
+            data = resp.json()
+            if resp.status_code != 200:
+                raise ValueError(f"Ollama embed failed: {data}")
+            results.append(data["embeddings"][0])
+        return results
 
     def embed_one(self, text: str) -> list[float]:
         return self.embed([text])[0]

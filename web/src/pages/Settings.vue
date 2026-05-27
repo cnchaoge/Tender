@@ -17,12 +17,21 @@
         <el-form v-if="editingModel || !currentModelName" label-position="top" class="settings-form">
           <el-form-item label="提供商">
             <el-select v-model="cfg.provider" style="width: 100%">
+              <el-option label="Ollama（本地）" value="ollama" />
               <el-option label="DeepSeek" value="deepseek" />
               <el-option label="通义千问" value="dashscope" />
             </el-select>
           </el-form-item>
           <el-form-item label="模型">
-            <el-select v-if="cfg.provider === 'deepseek'" v-model="cfg.model" style="width: 100%">
+            <el-select v-if="cfg.provider === 'ollama'" v-model="cfg.model" style="width: 100%">
+              <el-option
+                v-for="m in ollamaModels"
+                :key="m"
+                :label="m"
+                :value="m"
+              />
+            </el-select>
+            <el-select v-else-if="cfg.provider === 'deepseek'" v-model="cfg.model" style="width: 100%">
               <el-option label="deepseek-chat" value="deepseek-chat" />
               <el-option label="deepseek-coder" value="deepseek-coder" />
             </el-select>
@@ -32,7 +41,7 @@
               <el-option label="qwen-max（最强）" value="qwen-max" />
             </el-select>
           </el-form-item>
-          <el-form-item label="API Key">
+          <el-form-item v-if="cfg.provider !== 'ollama'" label="API Key">
             <el-input
               v-model="cfg.api_key"
               type="password"
@@ -44,8 +53,8 @@
             <span :class="v.model_ok ? 'text-success' : 'text-error'">{{ v.model_msg }}</span>
           </el-form-item>
           <el-form-item class="form-actions">
-            <el-button type="primary" :loading="v.loading" @click="verifyModel">验证</el-button>
-            <el-button :disabled="!v.model_ok" :loading="saving" @click="saveModel">保存</el-button>
+            <el-button v-if="cfg.provider !== 'ollama'" type="primary" :loading="v.loading" @click="verifyModel">验证</el-button>
+            <el-button :disabled="cfg.provider !== 'ollama' && !v.model_ok" :loading="saving" @click="saveModel">保存</el-button>
             <el-button type="info" @click="cancelModelEdit">取消</el-button>
           </el-form-item>
         </el-form>
@@ -64,14 +73,29 @@
         <el-form v-if="editingEmbed || !currentEmbedName" label-position="top" class="settings-form">
           <el-form-item label="向量模型">
             <el-select v-model="cfg.embed_provider" style="width: 100%">
+              <el-option label="Ollama（本地，需指定模型）" value="ollama" />
               <el-option label="通义千问（云，1024维）" value="dashscope" />
               <el-option label="BGE-large（本地，384维）" value="bge" />
               <el-option label="M3E-base（本地，768维）" value="m3e" />
               <el-option label="Mock（仅开发测试）" value="mock" />
             </el-select>
           </el-form-item>
+          <el-form-item v-if="cfg.embed_provider === 'ollama'" label="Embedding 模型名">
+            <el-select v-model="cfg.ollama_embed_model" style="width: 100%">
+              <el-option label="复用 LLM 模型" value="" />
+              <el-option
+                v-for="m in ollamaModels.filter(m => m.includes('bge') || m.includes('embed'))"
+                :key="m"
+                :label="m"
+                :value="m"
+              />
+            </el-select>
+          </el-form-item>
           <div class="embed-hint">
-            <span v-if="cfg.embed_provider === 'bge' || cfg.embed_provider === 'm3e'">
+            <span v-if="cfg.embed_provider === 'ollama'">
+              本地模型，需先 <code>ollama pull {{ cfg.ollama_embed_model || 'bge-m3' }}</code>
+            </span>
+            <span v-else-if="cfg.embed_provider === 'bge' || cfg.embed_provider === 'm3e'">
               本地模型，需联网下载。切换后需重启服务并等待模型加载。
             </span>
             <span v-else-if="cfg.embed_provider === 'dashscope'">
@@ -143,7 +167,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue"
+import { ref, onMounted, watch } from "vue"
 import { ElMessage } from "element-plus"
 import api from "../api"
 
@@ -151,12 +175,13 @@ const users = ref([])
 const saving = ref(false)
 const restarting = ref(false)
 
-const cfg = ref({ provider: "deepseek", model: "deepseek-chat", api_key: "", embed_provider: "dashscope" })
+const cfg = ref({ provider: "deepseek", model: "deepseek-chat", api_key: "", embed_provider: "dashscope", ollama_embed_model: "" })
 const editingModel = ref(false)
 const editingEmbed = ref(false)
 const currentModelName = ref("")
 const currentEmbedName = ref("")
 
+const ollamaModels = ref([])
 const v = ref({ loading: false, model_ok: false, model_msg: "" })
 
 const newUser = ref({ username: "", password: "", role: "user" })
@@ -164,8 +189,24 @@ const showAddUser = ref(false)
 const editingId = ref(null)
 const editUser = ref({ username: "", role: "user" })
 
+async function fetchOllamaModels() {
+  try {
+    const resp = await api.get("/api/admin/ollama/models")
+    ollamaModels.value = resp.data || []
+  } catch {}
+}
+
+watch(() => cfg.value.provider, (val) => {
+  if (val === "ollama") fetchOllamaModels()
+})
+
+watch(() => cfg.value.embed_provider, (val) => {
+  if (val === "ollama") fetchOllamaModels()
+})
+
 onMounted(async () => {
   await loadConfig()
+  if (cfg.value.provider === "ollama") fetchOllamaModels()
   try {
     const resp = await api.get("/api/admin/users")
     users.value = resp.data
@@ -176,12 +217,19 @@ async function loadConfig() {
   try {
     const resp = await api.get("/api/admin/config")
     cfg.value.provider = resp.data.llm_provider || "deepseek"
-    cfg.value.model = resp.data.llm_provider === "deepseek"
-      ? (resp.data.deepseek_model || "deepseek-chat")
-      : (resp.data.dashscope_model || "qwen-turbo")
+    if (resp.data.llm_provider === "ollama") {
+      cfg.value.model = resp.data.ollama_model || "qwen2.5:3b"
+    } else if (resp.data.llm_provider === "deepseek") {
+      cfg.value.model = resp.data.deepseek_model || "deepseek-chat"
+    } else {
+      cfg.value.model = resp.data.dashscope_model || "qwen-turbo"
+    }
     cfg.value.embed_provider = resp.data.embed_provider || "mock"
+    cfg.value.ollama_embed_model = resp.data.ollama_embed_model || ""
     currentModelName.value = cfg.value.model
-    currentEmbedName.value = cfg.value.embed_provider
+    currentEmbedName.value = cfg.value.embed_provider === "ollama" && cfg.value.ollama_embed_model
+      ? `Ollama / ${cfg.value.ollama_embed_model}`
+      : cfg.value.embed_provider
     editingModel.value = false
     editingEmbed.value = false
   } catch {}
@@ -241,10 +289,13 @@ async function saveEmbed() {
   saving.value = true
   try {
     await api.post("/api/admin/embed/config", {
-      embed_provider: cfg.value.embed_provider
+      embed_provider: cfg.value.embed_provider,
+      ollama_embed_model: cfg.value.ollama_embed_model
     })
     editingEmbed.value = false
-    currentEmbedName.value = cfg.value.embed_provider
+    currentEmbedName.value = cfg.value.embed_provider === "ollama" && cfg.value.ollama_embed_model
+      ? `Ollama / ${cfg.value.ollama_embed_model}`
+      : cfg.value.embed_provider
     ElMessage.success("Embedding 配置已保存，需重启服务生效")
   } catch (e) {
     console.error("saveEmbed error:", e.response?.data || e.message)
@@ -261,13 +312,36 @@ function cancelEmbedEdit() {
 
 async function restartServer() {
   restarting.value = true
+  ElMessage.info("服务重启中，请稍候...")
   try {
     await api.post("/api/admin/restart")
   } catch {
-    // expected: request fails after process kill
-  } finally {
-    setTimeout(() => { window.location.reload() }, 2000)
+    // 请求可能因进程重启而中断，正常
   }
+  // 轮询 /health 等待服务恢复
+  let retries = 0
+  const maxRetries = 30
+  function poll() {
+    retries++
+    const xhr = new XMLHttpRequest()
+    xhr.open("GET", "/health")
+    xhr.timeout = 2000
+    xhr.onload = () => {
+      try {
+        const d = JSON.parse(xhr.responseText)
+        if (d.status === "ok") { window.location.reload(); return }
+      } catch {}
+      retryOrReload()
+    }
+    xhr.onerror = retryOrReload
+    xhr.ontimeout = retryOrReload
+    xhr.send()
+  }
+  function retryOrReload() {
+    if (retries < maxRetries) setTimeout(poll, 1000)
+    else window.location.reload()
+  }
+  setTimeout(poll, 2000)
 }
 
 async function addUser() {
