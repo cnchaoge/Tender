@@ -2,9 +2,8 @@
 Tender - 文档解析器
 支持 PDF, Word, Excel, Markdown, TXT, 图片(OCR)
 """
-import os
+import logging
 from pathlib import Path
-from typing import Literal
 
 # PDF
 import pdfplumber
@@ -18,15 +17,56 @@ import openpyxl
 # PowerPoint
 from pptx import Presentation
 
+logger = logging.getLogger(__name__)
 
 def parse_pdf(file_path: str) -> tuple[str, list[dict]]:
-    """解析 PDF，返回 (纯文本, [页面文本列表])"""
+    """解析 PDF，返回 (纯文本, [页面文本列表])
+    优先用 pdfplumber 提取文字层，若内容过少（<100字符）则回退到 OCR。
+    """
     pages = []
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text() or ""
             pages.append(text)
-    return "\n\n".join(pages), [{"page": i+1, "text": t} for i, t in enumerate(pages)]
+
+    full_text = "\n\n".join(pages)
+    # 文字层内容过少，说明是扫描件，走 OCR 回退。OCR 依赖缺失时保留文字层，
+    # 避免短文本 PDF 直接解析失败。
+    if len(full_text.strip()) < 100:
+        try:
+            ocr_text, ocr_pages = _ocr_pdf_pages(file_path)
+        except Exception:
+            logger.warning("PDF text layer is short and OCR fallback failed for %s", file_path)
+        else:
+            if ocr_text.strip():
+                full_text = ocr_text
+                pages = ocr_pages
+
+    return full_text, [{"page": i+1, "text": t} for i, t in enumerate(pages)]
+
+
+def _ocr_pdf_pages(file_path: str) -> tuple[str, list[str]]:
+    """用 pymupdf 渲染页面 + tesseract OCR 提取中文"""
+    import io
+
+    import pytesseract
+    from PIL import Image
+    import pymupdf
+
+    doc = pymupdf.open(file_path)
+    pages_text = []
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        # 渲染 300 DPI 供 OCR 使用
+        mat = pymupdf.Matrix(300/72, 300/72)
+        pix = page.get_pixmap(matrix=mat)
+        img_data = pix.tobytes("png")
+        img = Image.open(io.BytesIO(img_data))
+        text = pytesseract.image_to_string(img, lang="chi_sim+eng")
+        pages_text.append(text.strip())
+
+    doc.close()
+    return "\n\n".join(pages_text), pages_text
 
 
 def parse_docx(file_path: str) -> tuple[str, list[dict]]:
@@ -131,7 +171,7 @@ def parse_image(file_path: str) -> tuple[str, list[dict]]:
                 paragraphs = [{"line": i+1, "text": l} for i, l in enumerate(lines)]
                 return text, paragraphs
             return "[OCR 未识别到文字]", []
-        except Exception as e:
+        except Exception:
             pass
 
         # 降级：pytesseract（需要系统安装 tesseract + 中文语言包）

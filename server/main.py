@@ -32,12 +32,23 @@ def _init_all_dbs():
     init_violation_db()
     _init_builtin_templates()
     init_builtin_glossary()
+    # In-process workers die with the server. Pick up rows left pending or
+    # processing by the previous process and discard any half-written chunks.
+    try:
+        from server.workers.document_worker import requeue_incomplete_documents
+        requeue_incomplete_documents()
+    except Exception as exc:
+        print(f"[KB] requeue incomplete documents failed: {exc}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _init_all_dbs()
-    yield
+    try:
+        yield
+    finally:
+        from server.workers.executor import shutdown_executor
+        shutdown_executor(wait=False)
 
 
 # PyInstaller 打包后的资源路径

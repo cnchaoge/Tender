@@ -28,9 +28,21 @@
           </el-upload>
         </div>
 
-        <!-- Upload progress -->
-        <div v-if="uploading" class="upload-progress">
-          <el-progress :percentage="uploadProgress" :stroke-width="4" />
+        <!-- Real worker status. The bar is indeterminate until /status is ready or failed. -->
+        <div v-if="kbStore.jobs.length" class="upload-progress">
+          <div v-for="job in kbStore.jobs" :key="job.docId" class="upload-job">
+            <div class="upload-job-label">
+              <span class="upload-job-name" :title="job.filename">{{ job.filename }}</span>
+              <span>{{ jobDetail(job) }}</span>
+            </div>
+            <el-progress
+              :percentage="statusPercent(job.status)"
+              :indeterminate="job.status === 'pending' || job.status === 'processing'"
+              :status="progressStatus(job.status)"
+              :stroke-width="4"
+              :show-text="false"
+            />
+          </div>
         </div>
 
         <!-- Document count -->
@@ -56,6 +68,7 @@
                 <span class="type-tag">{{ doc.file_type?.toUpperCase() }}</span>
                 <span class="status-dot" :class="doc.status"></span>
                 <span class="status-text">{{ statusLabel(doc.status) }}</span>
+                <span v-if="doc.chunk_count">{{ doc.chunk_count }} 段</span>
               </div>
             </div>
             <el-button
@@ -173,7 +186,6 @@ const kbStore = useKbStore()
 
 // ── Document list ──
 const uploading = ref(false)
-const uploadProgress = ref(0)
 const uploadRef = ref(null)
 const activeDocId = ref(null)
 
@@ -187,7 +199,31 @@ const dedupedDocuments = computed(() => {
 })
 
 function statusLabel(status) {
-  return { ready: '就绪', processing: '处理中', error: '错误' }[status] || status
+  return {
+    pending: "排队中",
+    processing: "处理中",
+    ready: "就绪",
+    failed: "失败",
+    error: "失败",
+  }[status] || status
+}
+
+function statusPercent(status) {
+  if (status === "ready" || status === "failed") return 100
+  if (status === "processing") return 70
+  return 15
+}
+
+function progressStatus(status) {
+  if (status === "ready") return "success"
+  if (status === "failed") return "exception"
+  return undefined
+}
+
+function jobDetail(job) {
+  const label = statusLabel(job.status)
+  if (job.chunkCount) return `${label} · ${job.chunkCount} 段`
+  return label
 }
 
 function selectDoc(doc) {
@@ -208,23 +244,33 @@ async function handleFileChange(file) {
   const rawFile = file.raw
   if (!rawFile) return
   uploading.value = true
-  uploadProgress.value = 0
-  const interval = setInterval(() => {
-    if (uploadProgress.value < 85) uploadProgress.value += 15
-  }, 200)
   try {
     const formData = new FormData()
     formData.append("file", rawFile)
-    await kbStore.uploadDocument(formData)
-    uploadProgress.value = 100
-    ElMessage.success("上传成功")
+    const result = await kbStore.uploadDocument(formData)
     uploadRef.value?.clearFiles()
+    const queued = result.status === "pending" || result.status === "processing"
+    if (result.duplicate && result.status === "ready") {
+      ElMessage.info("该文件已在知识库中")
+    } else if (result.status === "failed") {
+      ElMessage.error("文档处理失败")
+    } else if (queued) {
+      ElMessage.success(result.duplicate ? "该文件已在处理队列中" : "已接收，正在后台处理")
+      kbStore.trackJob(result.doc_id, rawFile.name, result.status)?.then((finalStatus) => {
+        if (!finalStatus) return
+        if (finalStatus.status === "ready") {
+          ElMessage.success(`${rawFile.name} 已处理完成`)
+        } else if (finalStatus.status === "failed") {
+          ElMessage.error(`${rawFile.name} 处理失败`)
+        }
+      })
+    } else {
+      ElMessage.success("上传成功")
+    }
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || "上传失败")
   } finally {
-    clearInterval(interval)
     uploading.value = false
-    uploadProgress.value = 0
   }
 }
 
@@ -327,7 +373,12 @@ function scrollBottom() {
   })
 }
 
-onMounted(() => kbStore.fetchDocuments())
+onMounted(async () => {
+  await kbStore.fetchDocuments()
+  for (const doc of kbStore.documents) {
+    kbStore.watchDocument(doc)
+  }
+})
 </script>
 
 <style scoped>
@@ -467,18 +518,46 @@ onMounted(() => kbStore.fetchDocuments())
   height: 5px;
   border-radius: 50%;
 }
+.status-dot.pending { background: var(--color-ink-subtle); }
 .status-dot.ready { background: var(--color-semantic-success); }
-.status-dot.processing { background: var(--color-semantic-warning); }
+.status-dot.processing {
+  background: var(--color-semantic-warning);
+  animation: kb-pulse 1.2s ease-in-out infinite;
+}
+.status-dot.failed,
 .status-dot.error { background: var(--color-semantic-error); }
+
+@keyframes kb-pulse {
+  50% { opacity: 0.35; }
+}
 
 .status-text {
   color: var(--color-ink-tertiary);
 }
 
-/* Upload progress */
+/* Upload progress — driven by GET /documents/{id}/status */
 .upload-progress {
   padding: 8px 16px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 148px;
+  overflow-y: auto;
+}
+.upload-job-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-ink-tertiary);
+  margin-bottom: 4px;
+}
+.upload-job-name {
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Empty state */

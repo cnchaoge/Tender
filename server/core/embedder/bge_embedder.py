@@ -24,10 +24,23 @@ def _get_model_path() -> str:
     if not model_dir.exists():
         raise RuntimeError(f"BGE model not found at {model_dir}. Please run download_bge.py first.")
 
-    # Find the actual model snapshot dir inside
+    # Look for model snapshot inside snapshots/ subdir (huggingface cache structure)
+    snapshots_dir = model_dir / "snapshots"
+    if snapshots_dir.exists():
+        for d in snapshots_dir.iterdir():
+            if d.is_dir():
+                for fname in ["model.safetensors", "pytorch_model.bin"]:
+                    fpath = d / fname
+                    if fpath.exists():
+                        return str(d)
+
+    # Fallback: direct children of model_dir (legacy structure)
     for d in model_dir.iterdir():
         if d.is_dir() and not d.name.startswith('.'):
             blks_file = d / "model.safetensors"
+            if blks_file.exists():
+                return str(d)
+            blks_file = d / "pytorch_model.bin"
             if blks_file.exists():
                 return str(d)
 
