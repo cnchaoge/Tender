@@ -2,13 +2,14 @@
 Tender - RAG 问答 API
 """
 import json
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from server.core.retriever.retriever import retrieve, build_context
 from server.core.generator.llm import get_generator
+from server.deps import get_current_user
 from server.models import QueryReq, QueryResp
 
-router = APIRouter(prefix="/api/rag", tags=["RAG问答"])
+router = APIRouter(prefix="/api/rag", tags=["RAG问答"], dependencies=[Depends(get_current_user)])
 
 SYSTEM_PROMPT = """你是一个专业的制造业文档助手，基于提供的参考文档回答用户问题。
 

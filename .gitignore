@@ -3,8 +3,8 @@
 .env.local
 .env.production
 
-# 数据目录
-data/
+# 运行时数据目录（仅仓库根下的 data/，不要误伤 server/data/）
+/data/
 *.db
 
 # Python

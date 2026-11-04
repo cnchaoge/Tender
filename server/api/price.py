@@ -4,12 +4,13 @@ Tender - 报价分析计算器 API
 import re
 import json
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from server.db.sqlite import get_db
 from server.core.generator.llm import get_generator
+from server.deps import get_current_user
 
-router = APIRouter(prefix="/api/price", tags=["报价分析"])
+router = APIRouter(prefix="/api/price", tags=["报价分析"], dependencies=[Depends(get_current_user)])
 
 # ── 模型 ───────────────────────────────────────────────────────────────────
 

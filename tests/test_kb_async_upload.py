@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from server.api import kb as kb_mod
+from server.deps import get_current_user
 from server.workers import document_worker as worker_mod
 from server.workers.executor import shutdown_executor
 
@@ -79,6 +80,18 @@ def getter(tmp_path):
     return _getter(db_path)
 
 
+def _authorized_app() -> FastAPI:
+    """KB routes require a logged-in user. Async tests override that check."""
+    app = FastAPI()
+    app.include_router(kb_mod.router)
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 1,
+        "username": "tester",
+        "role": "user",
+    }
+    return app
+
+
 @pytest.fixture
 def client(getter, tmp_path, monkeypatch):
     uploads = tmp_path / "uploads"
@@ -91,9 +104,27 @@ def client(getter, tmp_path, monkeypatch):
     monkeypatch.setattr(kb_mod, "get_db", getter)
     monkeypatch.setattr(kb_mod, "UPLOADS_DIR", uploads)
     monkeypatch.setattr(kb_mod, "schedule_document", fake_schedule)
+    return TestClient(_authorized_app()), scheduled
+
+
+def test_kb_routes_require_auth(getter, tmp_path, monkeypatch):
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    monkeypatch.setattr(kb_mod, "get_db", getter)
+    monkeypatch.setattr(kb_mod, "UPLOADS_DIR", uploads)
     app = FastAPI()
     app.include_router(kb_mod.router)
-    return TestClient(app), scheduled
+    http = TestClient(app)
+
+    assert http.get("/api/kb/documents").status_code == 401
+    assert http.get("/api/kb/documents/1/status").status_code == 401
+    assert http.get("/api/kb/folder", params={"folder_path": str(tmp_path)}).status_code == 401
+    uploaded = http.post(
+        "/api/kb/documents",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+    assert uploaded.status_code == 401
+    assert http.delete("/api/kb/documents/1").status_code == 401
 
 
 def test_upload_route_has_no_hardcoded_interpreter():
@@ -172,9 +203,7 @@ def test_upload_returns_while_worker_is_still_blocked(getter, tmp_path, monkeypa
     monkeypatch.setattr(kb_mod, "get_db", getter)
     monkeypatch.setattr(kb_mod, "UPLOADS_DIR", uploads)
     monkeypatch.setattr(worker_mod, "process_document", blocked)
-    app = FastAPI()
-    app.include_router(kb_mod.router)
-    http = TestClient(app)
+    http = TestClient(_authorized_app())
     try:
         started_at = time.perf_counter()
         resp = http.post(

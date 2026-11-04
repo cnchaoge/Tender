@@ -6,7 +6,7 @@ import uuid
 import json
 import difflib
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from pathlib import Path
@@ -16,6 +16,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from datetime import datetime
+
+from server.deps import get_current_user
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -353,7 +355,7 @@ from server.tools.violation_checker import get_violation_checker
 from server.tools.plagiarism_checker import get_plagiarism_checker
 from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, BidTemplateCreateReq, BidTemplateUpdateReq, Resp
 
-router = APIRouter(prefix="/api/bid", tags=["标书生成"])
+router = APIRouter(prefix="/api/bid", tags=["标书生成"], dependencies=[Depends(get_current_user)])
 settings = get_settings()
 
 SYSTEM_PROMPT = """你是一个专业的招投标文档专家，擅长分析招标文件并生成投标标书。"""

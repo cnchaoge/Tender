@@ -8,16 +8,17 @@ import uuid
 from pathlib import Path
 
 import aiofiles
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from server.config import UPLOADS_DIR
 from server.db.chromadb import delete_doc_chunks
 from server.db.sqlite import get_db
+from server.deps import get_current_user
 from server.models import Chunk, Document, Resp
 from server.workers.document_worker import cleanup_partial_document, write_lock
 from server.workers.executor import schedule_document
 
-router = APIRouter(prefix="/api/kb", tags=["知识库"])
+router = APIRouter(prefix="/api/kb", tags=["知识库"], dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 _UPLOAD_SUFFIXES = {

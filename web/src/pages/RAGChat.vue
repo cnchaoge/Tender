@@ -80,7 +80,7 @@ import { ref, nextTick } from "vue"
 import { ElMessage } from "element-plus"
 import { Loading, MagicStick, User, Promotion } from "@element-plus/icons-vue"
 import { marked } from "marked"
-import api from "../api"
+import api, { authFetch } from "../api"
 
 // Configure marked
 marked.setOptions({ breaks: true, gfm: true })
@@ -112,7 +112,7 @@ async function send() {
   messages.value.push({ role: "assistant", content: "", sources: [] })
 
   try {
-    const resp = await fetch(`${_apiBase}/api/rag/query`, {
+    const resp = await authFetch(`${_apiBase}/api/rag/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: q, top_k: 5, stream: true }),
@@ -149,6 +149,7 @@ async function send() {
       }
     }
   } catch (e) {
+    if (e.status === 401) return
     // 流式失败，降级为非流式
     try {
       const resp = await api.post("/api/rag/query", { question: q, top_k: 5 })
