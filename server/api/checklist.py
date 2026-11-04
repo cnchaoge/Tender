@@ -4,11 +4,12 @@ Tender - 投标材料检查清单 API
 import re
 import json
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from server.db.sqlite import get_db
+from server.deps import get_current_user
 
-router = APIRouter(prefix="/api/checklist", tags=["检查清单"])
+router = APIRouter(prefix="/api/checklist", tags=["检查清单"], dependencies=[Depends(get_current_user)])
 
 
 class ChecklistItemUpdate(BaseModel):

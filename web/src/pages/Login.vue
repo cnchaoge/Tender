@@ -37,6 +37,7 @@
         >
           登录
         </el-button>
+        <p v-if="errorMsg" class="login-error">{{ errorMsg }}</p>
       </el-form>
 
       <div class="login-tips">默认账号：admin / admin123</div>
@@ -55,6 +56,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const formRef = ref()
 const loading = ref(false)
+const errorMsg = ref("")
 
 const form = reactive({ username: "admin", password: "admin123" })
 const rules = {
@@ -66,11 +68,14 @@ async function handleLogin() {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
   loading.value = true
+  errorMsg.value = ""
   try {
     await authStore.login(form.username, form.password)
     router.push("/dashboard")
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || "登录失败")
+    const detail = e.response?.data?.detail
+    errorMsg.value = typeof detail === "string" ? detail : "登录失败"
+    ElMessage.error(errorMsg.value)
   } finally {
     loading.value = false
   }
@@ -127,6 +132,14 @@ async function handleLogin() {
   height: 44px;
   font-size: 15px;
   font-weight: 500;
+}
+
+.login-error {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-danger, #d03050);
+  text-align: center;
 }
 
 .login-tips {

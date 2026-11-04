@@ -12,11 +12,13 @@
         <div class="stat-num">{{ stats.chunk_count ?? 0 }}</div>
         <div class="stat-lbl">切片</div>
       </div>
-      <div class="stat-divider"></div>
-      <div class="stat-item">
-        <div class="stat-num">{{ stats.user_count ?? 0 }}</div>
-        <div class="stat-lbl">用户</div>
-      </div>
+      <template v-if="showUserCount">
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <div class="stat-num">{{ stats.user_count ?? 0 }}</div>
+          <div class="stat-lbl">用户</div>
+        </div>
+      </template>
     </div>
 
     <!-- ── 功能导航 ── -->
@@ -73,8 +75,11 @@
 <script setup>
 import { ref, onMounted } from "vue"
 import api from "../api"
+import { useAuthStore } from "../stores/auth"
 
+const authStore = useAuthStore()
 const stats = ref({ document_count: 0, chunk_count: 0, user_count: 0 })
+const showUserCount = ref(false)
 
 const features = [
   {
@@ -104,9 +109,23 @@ const features = [
 ]
 
 onMounted(async () => {
+  if (authStore.user?.role === "admin") {
+    try {
+      const resp = await api.get("/api/admin/stats")
+      stats.value = resp.data
+      showUserCount.value = true
+    } catch {}
+    return
+  }
+  // Document totals are available to every logged-in user. User count stays on the admin stats API.
   try {
-    const resp = await api.get("/api/admin/stats")
-    stats.value = resp.data
+    const resp = await api.get("/api/kb/documents")
+    const docs = resp.data || []
+    stats.value = {
+      document_count: docs.length,
+      chunk_count: docs.reduce((sum, doc) => sum + (doc.chunk_count || 0), 0),
+      user_count: 0,
+    }
   } catch {}
 })
 </script>

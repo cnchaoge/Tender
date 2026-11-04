@@ -160,7 +160,7 @@ import { ElMessage, ElMessageBox } from "element-plus"
 import { Delete, Upload, Document, MagicStick, User, Promotion, Loading } from "@element-plus/icons-vue"
 import { useKbStore } from "../stores/kb"
 import { marked } from "marked"
-import api from "../api"
+import api, { authFetch } from "../api"
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -258,13 +258,9 @@ async function send() {
   loading.value = true
 
   try {
-    const token = localStorage.getItem("token") || ""
-    const resp = await fetch("/api/rag/query", {
+    const resp = await authFetch("/api/rag/query", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: q, top_k: 5, stream: true }),
     })
 
@@ -303,6 +299,7 @@ async function send() {
       }
     }
   } catch (e) {
+    if (e.status === 401) return
     // 流式失败则移除占位消息，用非流式重试
     messages.value.pop()
     loading.value = true

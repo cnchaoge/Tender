@@ -20,7 +20,7 @@ const routes = [
       { path: "bid", name: "BidGenerate", component: () => import("../pages/BidGenerate.vue") },
       { path: "bid-analyze", name: "BidAnalyze", component: () => import("../pages/BidAnalyze.vue") },
       { path: "price", name: "PriceAnalyze", component: () => import("../pages/PriceAnalyze.vue") },
-      { path: "settings", name: "Settings", component: () => import("../pages/Settings.vue") },
+      { path: "settings", name: "Settings", component: () => import("../pages/Settings.vue"), meta: { requiresAdmin: true } },
     ]
   }
 ]
@@ -34,6 +34,8 @@ router.beforeEach((to, from, next) => {
   const authStore = useAuthStore()
   if (to.meta.requiresAuth && !authStore.token) {
     next("/login")
+  } else if (to.matched.some(record => record.meta.requiresAdmin) && authStore.user?.role !== "admin") {
+    next("/dashboard")
   } else if (to.meta.guest && authStore.token) {
     next("/")
   } else {
