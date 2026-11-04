@@ -2,7 +2,6 @@
 Tender - 知识库管理 API
 """
 import os
-import shutil
 import uuid
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
@@ -114,62 +113,56 @@ async def add_folder(folder_path: str):
 
 @router.post("/documents")
 async def upload_document(file: UploadFile = File(...)):
-    """上传单个文件到知识库"""
-    import aiofiles
+    """上传文件立即返回，后台线程完成 OCR → chunk → embed"""
+    import aiofiles, threading, queue
 
-    # 保存文件
     suffix = Path(file.filename).suffix.lower()
     if suffix not in [".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt", ".jpg", ".jpeg", ".png"]:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {suffix}")
 
-    # 去重：同名文件已存在则直接返回
+    # 去重
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT id, file_path FROM documents WHERE filename = ?", (file.filename,))
     existing = cur.fetchone()
     if existing:
         conn.close()
-        return {"file_path": existing["file_path"], "doc_id": existing["id"], "chunk_count": 0, "duplicate": True}
+        return {"doc_id": existing["id"], "status": "ready", "chunk_count": 0, "duplicate": True}
 
+    # 保存文件
     saved_path = UPLOADS_DIR / f"{uuid.uuid4().hex}{suffix}"
     async with aiofiles.open(saved_path, "wb") as f:
         content = await file.read()
         await f.write(content)
 
-    # 解析
-    text, _ = parse_file(str(saved_path))
-    chunks = chunk_text(text)
-
-    # 存入 SQLite
+    # 立即插入文档，状态 pending
     file_type = suffix.lstrip(".")
     if file_type in ("jpg", "jpeg", "png"):
         file_type = "image"
     cur.execute(
         "INSERT INTO documents (filename, file_type, file_path, file_size, status, chunk_count) VALUES (?, ?, ?, ?, ?, ?)",
-        (file.filename, file_type, str(saved_path), len(content), "ready", len(chunks))
+        (file.filename, file_type, str(saved_path), len(content), "pending", 0)
     )
     doc_id = cur.lastrowid
-
-    chunk_records = []
-    for i, chunk_text_content in enumerate(chunks):
-        cur.execute(
-            "INSERT INTO chunks (doc_id, chunk_index, text, metadata) VALUES (?, ?, ?, ?)",
-            (doc_id, i, chunk_text_content, "{}")
-        )
-        chunk_records.append({"text": chunk_text_content, "chunk_index": i, "metadata": {}})
-
-    # Embed 并加入向量库
-    embedder = get_embedder()
-    texts = [r["text"] for r in chunk_records]
-    vectors = embedder.embed(texts)
-    for r, v in zip(chunk_records, vectors):
-        r["vector"] = v
-
-    add_chunks(doc_id, chunk_records)
     conn.commit()
     conn.close()
 
-    return {"file_path": str(saved_path), "doc_id": doc_id, "chunk_count": len(chunks)}
+    # 后台处理：spawn 独立进程，避免 OCR 阻塞 uvicorn
+    import subprocess
+    worker_script = str(Path(__file__).parent.parent / "workers" / "document_worker.py")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).parent.parent.parent)  # tender/
+    # 用 uvicorn 所在 Python（3.9，装了所有依赖）
+    python_bin = "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python"
+    subprocess.Popen(
+        [python_bin, worker_script, str(doc_id), str(saved_path)],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        start_new_session=True
+    )
+
+    return {"doc_id": doc_id, "status": "pending", "chunk_count": 0}
 
 
 @router.delete("/documents/{doc_id}")
@@ -206,3 +199,16 @@ def get_chunks(doc_id: int):
     rows = cur.fetchall()
     conn.close()
     return [Chunk(**dict(r), metadata={}) for r in rows]
+
+
+@router.get("/documents/{doc_id}/status")
+def get_doc_status(doc_id: int):
+    """查询文档处理状态，前端轮询用"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, status, chunk_count FROM documents WHERE id = ?", (doc_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {"doc_id": row["id"], "status": row["status"], "chunk_count": row["chunk_count"] or 0}
