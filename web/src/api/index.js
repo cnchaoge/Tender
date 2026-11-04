@@ -31,8 +31,11 @@ const auth = {
 const kb = {
   list: () => http.get("/api/kb/documents"),
   upload: (formData) => http.post("/api/kb/documents", formData, {
-    headers: { "Content-Type": "multipart/form-data" }
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 300000,
   }),
+  status: (id) => http.get(`/api/kb/documents/${id}/status`),
+  folder: (folderPath) => http.get("/api/kb/folder", { params: { folder_path: folderPath } }),
   delete: (id) => http.delete(`/api/kb/documents/${id}`),
   getChunks: (id) => http.get(`/api/kb/documents/${id}/chunks`),
 }

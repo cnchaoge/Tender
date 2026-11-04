@@ -1,23 +1,52 @@
 """
 Tender - 知识库管理 API
 """
+import asyncio
+import logging
 import os
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
 
-from server.config import UPLOADS_DIR, CHUNKS_DIR, get_settings
+import aiofiles
+from fastapi import APIRouter, File, HTTPException, UploadFile
+
+from server.config import UPLOADS_DIR
+from server.db.chromadb import delete_doc_chunks
 from server.db.sqlite import get_db
-from server.db.chromadb import add_chunks, delete_doc_chunks
-from server.core.parser.document import parse_file, get_file_type
-from server.core.chunker.chunker import chunk_text
-from server.core.embedder.embedder import get_embedder
-from server.models import Document, Chunk, Resp
+from server.models import Chunk, Document, Resp
+from server.workers.document_worker import cleanup_partial_document, write_lock
+from server.workers.executor import schedule_document
 
 router = APIRouter(prefix="/api/kb", tags=["知识库"])
+logger = logging.getLogger(__name__)
 
-settings = get_settings()
+_UPLOAD_SUFFIXES = {
+    ".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt", ".jpg", ".jpeg", ".png",
+}
+_FOLDER_SUFFIXES = [".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt"]
+
+
+def _file_type_for_suffix(suffix: str) -> str:
+    file_type = suffix.lstrip(".")
+    if file_type in {"jpg", "jpeg", "png"}:
+        return "image"
+    return file_type
+
+
+def _insert_pending_document(filename: str, file_type: str, file_path: str, file_size: int) -> Document:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO documents (filename, file_type, file_path, file_size, status, chunk_count) VALUES (?, ?, ?, ?, ?, ?)",
+            (filename, file_type, file_path, file_size, "pending", 0),
+        )
+        doc_id = cur.lastrowid
+        conn.commit()
+        cur.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
+        return Document(**dict(cur.fetchone()))
+    finally:
+        conn.close()
 
 
 @router.get("/documents", response_model=list[Document])
@@ -30,164 +59,158 @@ def list_documents():
     return [Document(**dict(r)) for r in rows]
 
 
-@router.get("/folder", response_model=list[Document])
-async def add_folder(folder_path: str):
-    """扫描指定文件夹，将所有支持的文件加入知识库"""
-    folder = Path(folder_path)
-    if not folder.is_dir():
-        raise HTTPException(status_code=400, detail="文件夹不存在")
-
-    supported = [".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt"]
-    files = []
-    for ext in supported:
-        # 排除 node_modules 和 __pycache__
-        for f in folder.rglob(f"*{ext}"):
-            if "node_modules" in f.parts or "__pycache__" in f.parts:
+def _queue_folder(folder: Path) -> list[Document]:
+    """Insert pending rows for new files and hand each one to the worker pool."""
+    files: list[Path] = []
+    for ext in _FOLDER_SUFFIXES:
+        for file_path in folder.rglob(f"*{ext}"):
+            if "node_modules" in file_path.parts or "__pycache__" in file_path.parts:
                 continue
-            files.append(f)
+            files.append(file_path)
 
     if not files:
         raise HTTPException(status_code=400, detail="文件夹中没有找到支持的文档（.pdf/.docx/.xlsx/.md/.txt）")
 
-    # 查询已有文件（去重：同名已存在则跳过）
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT filename FROM documents")
-    existing_filenames = {row["filename"] for row in cur.fetchall()}
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT filename FROM documents")
+        existing_filenames = {row["filename"] for row in cur.fetchall()}
+    finally:
+        conn.close()
 
-    results = []
-    skipped = 0
+    results: list[Document] = []
+    errors = 0
     for file_path in files:
-        # 同名文件已存在则跳过（与单文件上传保持一致）
         if file_path.name in existing_filenames:
-            skipped += 1
             continue
-
         try:
-            text, page_info = parse_file(str(file_path))
-            chunks = chunk_text(text)
-
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO documents (filename, file_type, file_path, file_size, status, chunk_count) VALUES (?, ?, ?, ?, ?, ?)",
-                (file_path.name, get_file_type(str(file_path)), str(file_path), file_path.stat().st_size, "ready", len(chunks))
+            doc = _insert_pending_document(
+                file_path.name,
+                _file_type_for_suffix(file_path.suffix.lower()),
+                str(file_path),
+                file_path.stat().st_size,
             )
-            doc_id = cur.lastrowid
-
-            chunk_records = []
-            for i, chunk_text_content in enumerate(chunks):
-                cur.execute(
-                    "INSERT INTO chunks (doc_id, chunk_index, text, metadata) VALUES (?, ?, ?, ?)",
-                    (doc_id, i, chunk_text_content, "{}")
-                )
-                chunk_records.append({
-                    "text": chunk_text_content,
-                    "chunk_index": i,
-                    "metadata": {}
-                })
-
-            # Embed 所有 chunk 并加入向量库
-            embedder = get_embedder()
-            texts = [r["text"] for r in chunk_records]
-            vectors = embedder.embed(texts)
-            for r, v in zip(chunk_records, vectors):
-                r["vector"] = v
-
-            add_chunks(doc_id, chunk_records)
-            conn.commit()
-
-            cur.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
-            doc = Document(**dict(cur.fetchone()))
-            results.append(doc)
-            conn.close()
-        except Exception as e:
-            print(f"解析失败 {file_path}: {e}")
+        except Exception:
+            logger.exception("failed to queue %s", file_path)
+            errors += 1
             continue
-
-    if not results and not skipped:
-        raise HTTPException(status_code=500, detail="所有文件解析均失败")
+        existing_filenames.add(file_path.name)
+        # file_path is not on the Document model; schedule with the real path.
+        try:
+            schedule_document(doc.id, str(file_path))
+        except Exception:
+            logger.exception("failed to schedule folder doc_id=%s", doc.id)
+            try:
+                with write_lock:
+                    cleanup_partial_document(doc.id)
+            except Exception:
+                logger.exception("cleanup after folder schedule failure doc_id=%s", doc.id)
+            doc.status = "failed"
+            doc.chunk_count = 0
+        results.append(doc)
+    if not results and errors:
+        raise HTTPException(status_code=500, detail="所有文件均未能加入处理队列")
     return results
+
+
+@router.get("/folder", response_model=list[Document])
+async def add_folder(folder_path: str):
+    """扫描文件夹并立即返回 pending 文档，解析和向量化在后台完成。"""
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail="文件夹不存在")
+    # Directory walk is synchronous; keep it off the event loop. OCR/embed is
+    # not done here — schedule_document only queues the worker pool.
+    return await asyncio.to_thread(_queue_folder, folder)
 
 
 @router.post("/documents")
 async def upload_document(file: UploadFile = File(...)):
-    """上传文件立即返回，后台线程完成 OCR → chunk → embed"""
-    import aiofiles, threading, queue
-
-    suffix = Path(file.filename).suffix.lower()
-    if suffix not in [".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".md", ".txt", ".jpg", ".jpeg", ".png"]:
+    """保存文件后立即返回 pending。OCR、切片、向量化在独立线程池中完成。"""
+    filename = file.filename or "upload"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in _UPLOAD_SUFFIXES:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {suffix}")
 
-    # 去重
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT id, file_path FROM documents WHERE filename = ?", (file.filename,))
-    existing = cur.fetchone()
-    if existing:
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, status, chunk_count FROM documents WHERE filename = ?",
+            (filename,),
+        )
+        existing = cur.fetchone()
+    finally:
         conn.close()
-        return {"doc_id": existing["id"], "status": "ready", "chunk_count": 0, "duplicate": True}
+    if existing:
+        return {
+            "doc_id": existing["id"],
+            "status": existing["status"],
+            "chunk_count": existing["chunk_count"] or 0,
+            "duplicate": True,
+        }
 
-    # 保存文件
     saved_path = UPLOADS_DIR / f"{uuid.uuid4().hex}{suffix}"
-    async with aiofiles.open(saved_path, "wb") as f:
-        content = await file.read()
-        await f.write(content)
+    size = 0
+    async with aiofiles.open(saved_path, "wb") as handle:
+        while True:
+            blob = await file.read(1024 * 1024)
+            if not blob:
+                break
+            size += len(blob)
+            await handle.write(blob)
 
-    # 立即插入文档，状态 pending
-    file_type = suffix.lstrip(".")
-    if file_type in ("jpg", "jpeg", "png"):
-        file_type = "image"
-    cur.execute(
-        "INSERT INTO documents (filename, file_type, file_path, file_size, status, chunk_count) VALUES (?, ?, ?, ?, ?, ?)",
-        (file.filename, file_type, str(saved_path), len(content), "pending", 0)
-    )
-    doc_id = cur.lastrowid
-    conn.commit()
-    conn.close()
+    try:
+        doc = _insert_pending_document(filename, _file_type_for_suffix(suffix), str(saved_path), size)
+    except Exception:
+        saved_path.unlink(missing_ok=True)
+        raise
 
-    # 后台处理：spawn 独立进程，避免 OCR 阻塞 uvicorn
-    import subprocess
-    worker_script = str(Path(__file__).parent.parent / "workers" / "document_worker.py")
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(Path(__file__).parent.parent.parent)  # tender/
-    # 用 uvicorn 所在 Python（3.9，装了所有依赖）
-    python_bin = "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python"
-    subprocess.Popen(
-        [python_bin, worker_script, str(doc_id), str(saved_path)],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        start_new_session=True
-    )
+    doc = _queue_saved_document_at(doc, str(saved_path))
+    return {"doc_id": doc.id, "status": doc.status, "chunk_count": doc.chunk_count or 0}
 
-    return {"doc_id": doc_id, "status": "pending", "chunk_count": 0}
+
+def _queue_saved_document_at(doc: Document, file_path: str) -> Document:
+    try:
+        schedule_document(doc.id, file_path)
+    except Exception:
+        logger.exception("failed to schedule doc_id=%s", doc.id)
+        try:
+            with write_lock:
+                cleanup_partial_document(doc.id)
+        except Exception:
+            logger.exception("cleanup after schedule failure doc_id=%s", doc.id)
+        doc.status = "failed"
+        doc.chunk_count = 0
+    return doc
 
 
 @router.delete("/documents/{doc_id}")
 def delete_document(doc_id: int):
-    conn = get_db()
-    cur = conn.cursor()
-    
-    cur.execute("SELECT file_path FROM documents WHERE id = ?", (doc_id,))
-    row = cur.fetchone()
-    if not row:
+    with write_lock:
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("SELECT file_path FROM documents WHERE id = ?", (doc_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="文档不存在")
+
+        try:
+            os.remove(row["file_path"])
+        except Exception:
+            pass
+
+        try:
+            delete_doc_chunks(doc_id)
+        except Exception:
+            logger.exception("chroma delete failed for doc_id=%s", doc_id)
+        cur.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
+        cur.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        conn.commit()
         conn.close()
-        raise HTTPException(status_code=404, detail="文档不存在")
-    
-    # 删除文件
-    try:
-        os.remove(row["file_path"])
-    except Exception:
-        pass
-    
-    # 删除切片
-    delete_doc_chunks(doc_id)
-    cur.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
-    cur.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-    conn.commit()
-    conn.close()
     return Resp(message="删除成功")
 
 
@@ -203,7 +226,7 @@ def get_chunks(doc_id: int):
 
 @router.get("/documents/{doc_id}/status")
 def get_doc_status(doc_id: int):
-    """查询文档处理状态，前端轮询用"""
+    """查询文档处理状态。前端轮询直到 ready 或 failed。"""
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT id, status, chunk_count FROM documents WHERE id = ?", (doc_id,))

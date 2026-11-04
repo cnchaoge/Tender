@@ -39,7 +39,7 @@ class Document(BaseModel):
     file_type: str  # pdf | docx | md | txt
     file_size: int  # bytes
     chunk_count: int
-    status: str  # processing | ready | error
+    status: str  # pending | processing | ready | failed
     created_at: str
     updated_at: str
 
