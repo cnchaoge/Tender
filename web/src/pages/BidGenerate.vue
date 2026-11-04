@@ -467,10 +467,10 @@
               <span class="done-icon">✅</span>
               标书生成成功
             </div>
-            <a :href="generatedFile.url" target="_blank" class="download-btn">
+            <button type="button" class="download-btn" @click="downloadBidFile(generatedFile.name)">
               <el-icon><component :is="Download" /></el-icon>
               下载 {{ generatedFile.name }}
-            </a>
+            </button>
           </div>
 
           <!-- Done: Review -->
@@ -593,10 +593,10 @@
                   <el-button size="small" @click="showCompareDialog(v.id)">
                     对比
                   </el-button>
-                  <a v-if="v.file_path" :href="`${apiBase()}/api/bid/download/${getFilename(v.file_path)}`" target="_blank" class="version-download">
+                  <button v-if="v.file_path" type="button" class="version-download" @click="downloadBidFile(getFilename(v.file_path))">
                     <el-icon><component :is="Download" /></el-icon>
                     下载
-                  </a>
+                  </button>
                 </div>
               </div>
             </div>
@@ -693,7 +693,7 @@ import { ref, computed, nextTick, onMounted } from "vue"
 import { ElMessage } from "element-plus"
 import { Upload, Document, Files, Check, Download, ArrowRight, Plus, Loading } from "@element-plus/icons-vue"
 import { useKbStore } from "../stores/kb"
-import api from "../api"
+import api, { authFetch, downloadWithAuth } from "../api"
 import { marked } from "marked"
 import BidChecklistDialog from "../components/BidChecklistDialog.vue"
 import { checklist as checklistApi } from "../api"
@@ -982,6 +982,16 @@ function getFilename(path) {
   return path ? path.split("/").pop() : ""
 }
 
+async function downloadBidFile(filename) {
+  if (!filename) return
+  try {
+    await downloadWithAuth(`/api/bid/download/${encodeURIComponent(filename)}`, filename)
+  } catch (e) {
+    if (e.status === 401) return
+    ElMessage.error(e.message || "下载失败")
+  }
+}
+
 function renderMarkdown(text) {
   return marked.parse(text || "")
 }
@@ -1153,12 +1163,10 @@ async function doGenerate() {
   genCurrentStep.value = 1
 
   try {
-    const token = localStorage.getItem("token") || ""
-    const response = await fetch(`${apiBase()}/api/bid/generate/stream`, {
+    const response = await authFetch(`${apiBase()}/api/bid/generate/stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
       },
       body: JSON.stringify({
         parse_result: parseResult.value,
@@ -1233,7 +1241,6 @@ async function doGenerate() {
             genCurrentStep.value = 5 // 完成
             generatedFile.value = {
               name: data.filename,
-              url: `${apiBase()}/api/bid/download/${data.filename}`,
             }
             reviewResult.value = data.review || null
             if (data.violation_result) violationResult.value = data.violation_result
@@ -1253,7 +1260,8 @@ async function doGenerate() {
     if (generatedFile.value) ElMessage.success("标书生成成功")
     else ElMessage.error("生成失败")
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || "生成失败")
+    if (e.status === 401) return
+    ElMessage.error(e.response?.data?.detail || e.message || "生成失败")
   } finally {
     generating.value = false
   }
@@ -2416,6 +2424,8 @@ async function doGenerate() {
   display: flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
+  font: inherit;
   font-size: 13px;
   font-weight: 500;
   color: var(--color-ink);
@@ -2818,6 +2828,9 @@ async function doGenerate() {
   display: flex;
   align-items: center;
   gap: 4px;
+  cursor: pointer;
+  font: inherit;
+  background: transparent;
   font-size: 12px;
   color: var(--color-ink-subtle);
   text-decoration: none;

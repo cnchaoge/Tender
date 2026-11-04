@@ -6,11 +6,12 @@ import sys
 import subprocess
 import threading
 import time
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from server.db.sqlite import get_db
 from server.config import get_settings, update_env
+from server.deps import require_admin
 
 # ============ 热重启 ============
 def _do_restart():
@@ -32,7 +33,7 @@ def restart_server_async():
     t.start()
 from server.models import Resp
 
-router = APIRouter(prefix="/api/admin", tags=["管理后台"])
+router = APIRouter(prefix="/api/admin", tags=["管理后台"], dependencies=[Depends(require_admin)])
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
 

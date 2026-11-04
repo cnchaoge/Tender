@@ -5,7 +5,7 @@ import os
 import shutil
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 
 from server.config import UPLOADS_DIR, CHUNKS_DIR, get_settings
@@ -14,9 +14,10 @@ from server.db.chromadb import add_chunks, delete_doc_chunks
 from server.core.parser.document import parse_file, get_file_type
 from server.core.chunker.chunker import chunk_text
 from server.core.embedder.embedder import get_embedder
+from server.deps import get_current_user
 from server.models import Document, Chunk, Resp
 
-router = APIRouter(prefix="/api/kb", tags=["知识库"])
+router = APIRouter(prefix="/api/kb", tags=["知识库"], dependencies=[Depends(get_current_user)])
 
 settings = get_settings()
 

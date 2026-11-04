@@ -3,11 +3,19 @@ Tender - 内置招投标词汇表初始化
 系统启动时将词汇表嵌入到 ChromaDB，供 RAG 检索使用
 """
 import json
-from server.data.glossary_data import GLOSSARY_ENTRIES
+
+try:
+    # Shipped separately. A root `.gitignore` rule of `data/` also ignores
+    # `server/data/`, so a clean checkout may not have this module.
+    from server.data.glossary_data import GLOSSARY_ENTRIES
+except ImportError:
+    GLOSSARY_ENTRIES = []
 
 
 def init_builtin_glossary():
     """将内置词汇表嵌入到知识库（如果尚未加载）"""
+    if not GLOSSARY_ENTRIES:
+        return
     from server.db.sqlite import get_db
     from server.db.chromadb import add_chunks
     from server.core.chunker.chunker import chunk_text

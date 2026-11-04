@@ -66,10 +66,11 @@ app.include_router(admin.router)
 app.include_router(price_api.router)
 app.include_router(checklist.router)
 
-# 静态文件（前端dist）
+# 静态文件（前端dist）。assets 目录在未构建时可能不存在，不能因此让应用无法启动。
 WEB_DIST = _get_resource_path("web/dist")
-if WEB_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="assets")
+_assets_dir = WEB_DIST / "assets"
+if _assets_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
 # 使用说明文档（Markdown + Docsify）
 DOCS_DIR = _get_resource_path("docs")

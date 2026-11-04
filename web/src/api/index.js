@@ -8,17 +8,79 @@ const http = axios.create({
   timeout: 60000
 })
 
+function apiBase() {
+  return isDev ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000")
+}
+
+export function redirectToLogin() {
+  localStorage.removeItem("token")
+  localStorage.removeItem("user")
+  if (window.location.pathname !== "/login") {
+    window.location.href = "/login"
+  }
+}
+
+http.interceptors.request.use(config => {
+  const token = localStorage.getItem("token")
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 http.interceptors.response.use(
   resp => resp,
   err => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem("token")
-      localStorage.removeItem("user")
-      window.location.href = "/login"
+    const url = err.config?.url || ""
+    // Wrong password is also 401; stay on the login form so the error can show.
+    if (err.response?.status === 401 && !url.includes("/api/auth/login")) {
+      redirectToLogin()
     }
     return Promise.reject(err)
   }
 )
+
+// fetch() (SSE streams) does not use the axios interceptors above.
+export async function authFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {})
+  const token = localStorage.getItem("token") || ""
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`)
+  }
+  const resp = await fetch(url, { ...options, headers })
+  if (resp.status === 401) {
+    redirectToLogin()
+    const error = new Error("未登录")
+    error.status = 401
+    throw error
+  }
+  return resp
+}
+
+export async function downloadWithAuth(path, filename) {
+  const resp = await authFetch(`${apiBase()}${path}`)
+  if (!resp.ok) {
+    let detail = ""
+    try {
+      const data = await resp.json()
+      detail = data.detail || ""
+    } catch {
+      detail = ""
+    }
+    const error = new Error(detail || `下载失败 (${resp.status})`)
+    error.status = resp.status
+    throw error
+  }
+  const blob = await resp.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = objectUrl
+  a.download = filename || "download"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
+}
 
 // ── 认证 ─────────────────────────────────────────────────────────────────────
 const auth = {
@@ -53,10 +115,10 @@ const bid = {
     parse_result: parseResult,
     materials
   }, { timeout: 300000 }),
-  download: (filename) => {
-    const base = isDev ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000")
-    return `${base}/api/bid/download/${filename}`
-  },
+  download: (filename) => downloadWithAuth(
+    `/api/bid/download/${encodeURIComponent(filename)}`,
+    filename
+  ),
   matchCheck: (parseResult, materials) =>
     http.post("/api/bid/match_check", { parse_result: parseResult, materials }),
   recommendPreview: (docId) => http.get(`/api/bid/recommend/${docId}/preview`),
