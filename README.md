@@ -78,7 +78,35 @@ python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
 ### 4. 打开浏览器
 
 - 访问 http://localhost:8000
-- 默认账号：`admin` / `admin123`
+- 全新安装时，启动日志会打印一次性管理员密码，并写入 `data/initial_admin_password.txt`。该文件权限为仅当前用户可读，且已被 gitignore
+- 用户名是 `admin`。用该一次性密码登录后，必须立刻修改密码，然后删除密码文件
+- 修改完成或管理员被删除之后，重启不会再创建账号，也不会再写回旧的公开密码
+
+### 5. 配置 JWT 密钥（`SECRET_KEY`）
+
+签名密钥不再有公开的默认值。
+
+| 环境 | 行为 |
+|------|------|
+| 本地 / 开发（`DEBUG=true`，且 `APP_ENV` 不是 `production`） | 未设置 `SECRET_KEY` 时，首次启动在 `data/.secret_key` 生成随机密钥，之后每次启动复用。不写入 `.env` |
+| 生产（`DEBUG=false` 或 `APP_ENV=production`） | 必须自行设置 `SECRET_KEY`，否则进程拒绝启动 |
+| 任意环境 | 历史默认值 `tender-secret-key-change-in-production` 视为未设置，不会用来签名 |
+
+生成一个密钥：
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+生产环境写入 `.env`（不要提交这个文件）：
+
+```env
+DEBUG=false
+APP_ENV=production
+SECRET_KEY=上一步生成的字符串
+```
+
+已有部署在切换到生产模式之前必须设置 `SECRET_KEY`。用旧默认密钥签发的登录态会失效，重新登录即可。若管理员密码仍是以前随版本写入的 `admin123`，还可以用它登录一次，登录后必须修改；已经改过的密码不会被重置，删除用户也不会自动加回 `admin`。
 
 ---
 

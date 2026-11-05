@@ -9,7 +9,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from passlib.context import CryptContext
-from server.db.sqlite import get_db
+from server.db.sqlite import LEGACY_ADMIN_PASSWORD, get_db
 from server.config import get_settings, update_env
 from server.deps import require_admin
 
@@ -84,6 +84,8 @@ def create_user(body: dict):
 
     if not username or not password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+    if password == LEGACY_ADMIN_PASSWORD:
+        raise HTTPException(status_code=400, detail="不能使用已公开的默认密码")
 
     if role not in ["admin", "user"]:
         raise HTTPException(status_code=400, detail="角色无效")
@@ -116,8 +118,14 @@ def update_user(user_id: int, body: dict):
     if username:
         cur.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
     if password:
+        if password == LEGACY_ADMIN_PASSWORD:
+            conn.close()
+            raise HTTPException(status_code=400, detail="不能使用已公开的默认密码")
         password_hash = pwd_ctx.hash(password)
-        cur.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+        cur.execute(
+            "UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?",
+            (password_hash, user_id),
+        )
     if role in ["admin", "user"]:
         cur.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
 

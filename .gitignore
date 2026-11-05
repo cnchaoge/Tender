@@ -7,6 +7,10 @@
 /data/
 *.db
 
+# 安装时生成的密钥和一次性管理员密码，禁止提交
+data/.secret_key
+data/initial_admin_password.txt
+
 # Python
 __pycache__/
 *.pyc
