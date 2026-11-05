@@ -349,6 +349,7 @@ def _docx_from_markdown(content: str, title: str = "投标标书") -> DocxDocume
 from server.config import GENERATED_DIR, get_settings
 from server.db.sqlite import get_db
 from server.core.retriever.retriever import retrieve
+from server.core.retriever.section_query import collect_section_materials
 from server.core.generator.llm import get_generator
 from server.core.reviewer import review_bid, _check_format_compliance
 from server.tools.violation_checker import get_violation_checker
@@ -685,6 +686,43 @@ def _format_scoring(scoring: dict) -> str:
     return "\n".join(lines)
 
 
+def _load_material_docs(doc_ids: list) -> list[dict]:
+    """按素材 ID 读取文件名。缺失的文档直接跳过。"""
+    if not doc_ids:
+        return []
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        docs = []
+        for doc_id in doc_ids:
+            cur.execute("SELECT id, filename FROM documents WHERE id = ?", (doc_id,))
+            row = cur.fetchone()
+            if row:
+                docs.append({"id": row["id"], "filename": row["filename"]})
+        return docs
+    finally:
+        conn.close()
+
+
+def _retrieve_materials_text(
+    parse_result: dict,
+    materials,
+    chapters=None,
+    per_doc_k: Optional[int] = None,
+    max_chars: int = 6000,
+) -> str:
+    """按章节检索选中素材。流式与非流式生成共用这一条路径。"""
+    docs = _load_material_docs(list(materials or []))
+    return collect_section_materials(
+        docs,
+        parse_result or {},
+        chapters,
+        retrieve_fn=retrieve,
+        per_doc_k=per_doc_k,
+        max_chars=max_chars,
+    )
+
+
 @router.post("/plan", response_model=BidPlanResp)
 def plan_bid(req: BidPlanReq):
     """生成标书目录大纲（规划阶段）"""
@@ -710,22 +748,10 @@ def plan_bid(req: BidPlanReq):
 
     generator = get_generator()
 
-    # 检索相关素材摘要
-    materials_text = ""
-    if req.materials:
-        conn = get_db()
-        for doc_id in req.materials:
-            cur = conn.cursor()
-            cur.execute("SELECT filename FROM documents WHERE id = ?", (doc_id,))
-            row = cur.fetchone()
-            if row:
-                chunks = retrieve(
-                    f"招标文件：{req.parse_result.get('project_name', '')} {req.parse_result.get('deadline', '')}",
-                    top_k=2, doc_ids=[doc_id]
-                )
-                for chunk in chunks:
-                    materials_text += f"[{row['filename']}]\n{chunk['text'][:500]}\n\n"
-        conn.close()
+    # 规划阶段还没有章节，用招标要求与评分项做文档级检索，而不是只查项目名和工期。
+    materials_text = _retrieve_materials_text(
+        req.parse_result, req.materials, per_doc_k=2, max_chars=2000
+    )
 
     scoring_text = _format_scoring(req.parse_result.get("scoring", {}))
 
@@ -791,21 +817,10 @@ def generate_bid(req: BidGenerateReq):
     """根据招标文件生成标书（带 AI 质检，非流式）"""
     generator = get_generator()
 
-    # 检索相关素材
-    materials_text = ""
-    if req.materials:
-        conn = get_db()
-        cur = conn.cursor()
-        for doc_id in req.materials:
-            cur.execute("SELECT filename, id FROM documents WHERE id = ?", (doc_id,))
-            row = cur.fetchone()
-            if row:
-                # 注意：parse_result 是 dict，直接 stringify 传入 retrieve
-                query_for_retrieve = f"招标文件：{req.parse_result.get('project_name', '')} {req.parse_result.get('deadline', '')}"
-                chunks = retrieve(query_for_retrieve, top_k=3, doc_ids=[doc_id])
-                for chunk in chunks:
-                    materials_text += f"[{row['filename']}]\n{chunk['text']}\n\n"
-        conn.close()
+    # 按章节检索素材：查询包含章节标题/用途，以及与该章相关的技术要求和评分项。
+    materials_text = _retrieve_materials_text(
+        req.parse_result, req.materials, req.chapters
+    )
 
     # 检查是否需要 raw_text 降级
     raw_text = req.parse_result.get("raw_text", "")
@@ -832,8 +847,8 @@ def generate_bid(req: BidGenerateReq):
 
 {bid_info}
 
-可用素材：
-{materials_text[:5000] if materials_text else "无"}
+可用素材（按章节分组，撰写该章节时优先使用对应素材）：
+{materials_text if materials_text else "无"}
 
 请生成完整的投标标书，包含：
 1. 投标函
@@ -892,20 +907,10 @@ async def generate_bid_stream(req: BidGenerateReq):
     """SSE 流式生成标书，逐步推送进度"""
     generator = get_generator()
 
-    # 检索相关素材
-    materials_text = ""
-    if req.materials:
-        conn = get_db()
-        cur = conn.cursor()
-        for doc_id in req.materials:
-            cur.execute("SELECT filename, id FROM documents WHERE id = ?", (doc_id,))
-            row = cur.fetchone()
-            if row:
-                query_for_retrieve = f"招标文件：{req.parse_result.get('project_name', '')} {req.parse_result.get('deadline', '')}"
-                chunks = retrieve(query_for_retrieve, top_k=3, doc_ids=[doc_id])
-                for chunk in chunks:
-                    materials_text += f"[{row['filename']}]\n{chunk['text']}\n\n"
-        conn.close()
+    # 与非流式生成共用按章节检索，避免流式路径仍只用项目名和工期。
+    materials_text = _retrieve_materials_text(
+        req.parse_result, req.materials, req.chapters
+    )
 
     # 检查是否需要 raw_text 降级
     raw_text = req.parse_result.get("raw_text", "")
@@ -934,8 +939,8 @@ async def generate_bid_stream(req: BidGenerateReq):
 
 {_get_strategy_guidance(req.strategy)}
 
-可用素材：
-{materials_text[:5000] if materials_text else "无"}
+可用素材（按章节分组，撰写该章节时优先使用对应素材）：
+{materials_text if materials_text else "无"}
 
 请生成完整的投标标书，包含：
 1. 投标函
