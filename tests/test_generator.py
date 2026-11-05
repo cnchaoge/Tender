@@ -15,3 +15,5 @@ def test_get_generator_mock():
     # non-audit prompt returns the mock tender string
     res2 = g.generate('生成投标文档')
     assert '# 投标函' in res2
+    assert ''.join(g.generate_stream('生成投标文档')) == res2
+    assert ''.join(g.generate_stream('请做一次审核')) == res

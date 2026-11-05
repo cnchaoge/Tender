@@ -695,7 +695,7 @@ import { ref, computed, nextTick, onMounted } from "vue"
 import { ElMessage } from "element-plus"
 import { Upload, Document, Files, Check, Download, ArrowRight, Plus, Loading } from "@element-plus/icons-vue"
 import { useKbStore } from "../stores/kb"
-import api, { authFetch, bid, downloadWithAuth } from "../api"
+import api, { bid, downloadWithAuth } from "../api"
 import { marked } from "marked"
 import BidChecklistDialog from "../components/BidChecklistDialog.vue"
 import { checklist as checklistApi } from "../api"
@@ -709,10 +709,6 @@ onMounted(() => {
 })
 
 const kbStore = useKbStore()
-// 统一 API 基础路径：dev 走相对路径（Vite proxy），prod 用完整 URL
-function apiBase() {
-  return import.meta.env.DEV ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000")
-}
 const bidFile = ref(null)
 const bidDocId = ref(null)  // 上传的招标文件 doc_id，不参与素材选择
 const parseResult = ref(null)
@@ -1194,17 +1190,11 @@ async function doGenerate() {
   genCurrentStep.value = 1
 
   try {
-    const response = await authFetch(`${apiBase()}/api/bid/generate/stream`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        parse_result: parseResult.value,
-        materials: selectedMaterials.value,
-        chapters: planningChapters.value,
-        strategy: selectedStrategy.value,
-      })
+    const response = await bid.openGenerateStream({
+      parse_result: parseResult.value,
+      materials: selectedMaterials.value,
+      chapters: planningChapters.value,
+      strategy: selectedStrategy.value,
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
