@@ -26,8 +26,11 @@ def _unauthorized(detail: str = "未登录或登录已过期") -> HTTPException:
     )
 
 
-def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> dict[str, Any]:
-    """Resolve the Bearer token to a user row, or 401."""
+PASSWORD_CHANGE_REQUIRED = "必须先修改密码"
+
+
+def _load_user(token: Optional[str]) -> dict[str, Any]:
+    """Resolve a Bearer token to a user row, or 401."""
     if not token:
         raise _unauthorized()
 
@@ -44,7 +47,10 @@ def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> dict[str,
     conn = get_db()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,))
+        cur.execute(
+            "SELECT id, username, role, must_change_password FROM users WHERE id = ?",
+            (user_id,),
+        )
         row = cur.fetchone()
     finally:
         conn.close()
@@ -52,7 +58,31 @@ def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> dict[str,
     if row is None:
         raise _unauthorized("用户不存在")
 
-    return {"id": row["id"], "username": row["username"], "role": row["role"]}
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "role": row["role"],
+        "must_change_password": bool(row["must_change_password"]),
+    }
+
+
+def get_authenticated_user(token: Optional[str] = Depends(oauth2_scheme)) -> dict[str, Any]:
+    """Logged-in user, including one who still has to change their password."""
+    return _load_user(token)
+
+
+def get_current_user(
+    user: dict[str, Any] = Depends(get_authenticated_user),
+) -> dict[str, Any]:
+    """Logged-in user who is allowed to use the API.
+
+    A bootstrap or legacy password can sign in, then must be changed before
+    any other protected route. Login, logout, the current-user profile, and
+    the password change itself stay available.
+    """
+    if user.get("must_change_password"):
+        raise HTTPException(status_code=403, detail=PASSWORD_CHANGE_REQUIRED)
+    return user
 
 
 def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:

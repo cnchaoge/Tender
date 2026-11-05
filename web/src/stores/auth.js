@@ -11,11 +11,28 @@ export const useAuthStore = defineStore("auth", () => {
   async function login(username, password) {
     const resp = await api.post("/api/auth/login", { username, password })
     token.value = resp.data.access_token
-    user.value = resp.data.user
+    user.value = {
+      ...resp.data.user,
+      must_change_password: !!(
+        resp.data.user?.must_change_password || resp.data.must_change_password
+      ),
+    }
     localStorage.setItem("token", token.value)
     localStorage.setItem("user", JSON.stringify(user.value))
     if (api.defaults?.headers?.common) {
       api.defaults.headers.common["Authorization"] = `Bearer ${token.value}`
+    }
+    return resp.data
+  }
+
+  async function changePassword(oldPassword, newPassword) {
+    const resp = await api.post("/api/auth/change-password", {
+      old_password: oldPassword,
+      new_password: newPassword,
+    })
+    if (user.value) {
+      user.value = { ...user.value, must_change_password: false }
+      localStorage.setItem("user", JSON.stringify(user.value))
     }
     return resp.data
   }
@@ -35,5 +52,5 @@ export const useAuthStore = defineStore("auth", () => {
     api.defaults.headers.common["Authorization"] = `Bearer ${token.value}`
   }
 
-  return { token, user, isLoggedIn, login, logout }
+  return { token, user, isLoggedIn, login, changePassword, logout }
 })

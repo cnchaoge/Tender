@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from jose import jwt
 
 from server.api.auth import pwd_ctx
-from server.config import get_settings
+from server.config import PUBLIC_INSECURE_SECRET_KEYS, get_settings
 from server.db.sqlite import get_db
 from server.main import app
 
@@ -153,6 +153,8 @@ def test_invalid_and_expired_token_return_401(auth_env):
     assert resp.status_code == 401
 
     settings = get_settings()
+    assert settings.SECRET_KEY
+    assert settings.SECRET_KEY not in PUBLIC_INSECURE_SECRET_KEYS
     expired = jwt.encode(
         {
             "sub": str(auth_env["user_id"]),

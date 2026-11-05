@@ -36,6 +36,20 @@ http.interceptors.response.use(
     if (err.response?.status === 401 && !url.includes("/api/auth/login")) {
       redirectToLogin()
     }
+    if (err.response?.status === 403 && err.response?.data?.detail === "必须先修改密码") {
+      try {
+        const stored = JSON.parse(localStorage.getItem("user") || "null")
+        if (stored) {
+          stored.must_change_password = true
+          localStorage.setItem("user", JSON.stringify(stored))
+        }
+      } catch {
+        // Ignore a corrupt local user cache; the redirect still applies.
+      }
+      if (window.location.pathname !== "/change-password") {
+        window.location.href = "/change-password"
+      }
+    }
     return Promise.reject(err)
   }
 )
@@ -87,6 +101,11 @@ const auth = {
   login: (username, password) => http.post("/api/auth/login", { username, password }),
   logout: () => http.post("/api/auth/logout"),
   me: () => http.get("/api/auth/me"),
+  changePassword: (oldPassword, newPassword) =>
+    http.post("/api/auth/change-password", {
+      old_password: oldPassword,
+      new_password: newPassword,
+    }),
 }
 
 // ── 知识库 ────────────────────────────────────────────────────────────────────

@@ -39,8 +39,6 @@
         </el-button>
         <p v-if="errorMsg" class="login-error">{{ errorMsg }}</p>
       </el-form>
-
-      <div class="login-tips">默认账号：admin / admin123</div>
     </div>
   </div>
 </template>
@@ -58,7 +56,7 @@ const formRef = ref()
 const loading = ref(false)
 const errorMsg = ref("")
 
-const form = reactive({ username: "admin", password: "admin123" })
+const form = reactive({ username: "", password: "" })
 const rules = {
   username: [{ required: true, message: "请输入用户名", trigger: "blur" }],
   password: [{ required: true, message: "请输入密码", trigger: "blur" }]
@@ -70,8 +68,12 @@ async function handleLogin() {
   loading.value = true
   errorMsg.value = ""
   try {
-    await authStore.login(form.username, form.password)
-    router.push("/dashboard")
+    const data = await authStore.login(form.username, form.password)
+    if (data.user?.must_change_password || data.must_change_password) {
+      router.push("/change-password")
+    } else {
+      router.push("/dashboard")
+    }
   } catch (e) {
     const detail = e.response?.data?.detail
     errorMsg.value = typeof detail === "string" ? detail : "登录失败"
@@ -140,11 +142,5 @@ async function handleLogin() {
   line-height: 1.4;
   color: var(--color-danger, #d03050);
   text-align: center;
-}
-
-.login-tips {
-  text-align: center;
-  color: var(--color-ink-tertiary);
-  font-size: 12px;
 }
 </style>

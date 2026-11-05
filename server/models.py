@@ -23,6 +23,12 @@ class LoginResp(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: dict
+    must_change_password: bool = False
+
+
+class ChangePasswordReq(BaseModel):
+    old_password: str
+    new_password: str
 
 
 class UserInfo(BaseModel):
@@ -30,6 +36,7 @@ class UserInfo(BaseModel):
     username: str
     role: str  # admin | user
     created_at: str
+    must_change_password: bool = False
 
 
 # ============ 文档 ============

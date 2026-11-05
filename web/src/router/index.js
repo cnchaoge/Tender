@@ -9,6 +9,12 @@ const routes = [
     meta: { guest: true }
   },
   {
+    path: "/change-password",
+    name: "ChangePassword",
+    component: () => import("../pages/ChangePassword.vue"),
+    meta: { requiresAuth: true, allowPasswordChange: true }
+  },
+  {
     path: "/",
     component: () => import("../layouts/MainLayout.vue"),
     meta: { requiresAuth: true },
@@ -32,12 +38,17 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   const authStore = useAuthStore()
+  const mustChange = !!(authStore.token && authStore.user?.must_change_password)
   if (to.meta.requiresAuth && !authStore.token) {
     next("/login")
+  } else if (mustChange && !to.meta.allowPasswordChange) {
+    next("/change-password")
+  } else if (to.meta.allowPasswordChange && authStore.token && !mustChange) {
+    next("/dashboard")
   } else if (to.matched.some(record => record.meta.requiresAdmin) && authStore.user?.role !== "admin") {
     next("/dashboard")
   } else if (to.meta.guest && authStore.token) {
-    next("/")
+    next(mustChange ? "/change-password" : "/")
   } else {
     next()
   }

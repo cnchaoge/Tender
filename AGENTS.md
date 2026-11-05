@@ -119,8 +119,9 @@ All configuration is via `.env` at project root. Key vars:
 | `EMBED_PROVIDER` | `ollama` | Embedding backend: ollama/dashscope/bge/m3e/mock |
 | `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `8000` | Server port |
-| `DEBUG` | `true` | Debug mode |
-| `SECRET_KEY` | `tender-secret-key-...` | JWT signing key |
+| `DEBUG` | `true` | Debug mode. `false` requires a unique `SECRET_KEY` |
+| `APP_ENV` | `development` | `production` requires a unique `SECRET_KEY` |
+| `SECRET_KEY` | empty | JWT signing key. Dev generates `data/.secret_key`. The public placeholder is rejected |
 | `OLLAMA_MODEL` | `qwen3:4b` | Local LLM model (in .env) |
 | `OLLAMA_EMBED_MODEL` | (same as OLLAMA_MODEL) | Local embedding model |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama service URL |

@@ -14,11 +14,13 @@
 
 **步骤 1：** 双击运行 `Tender.exe`
 
-**步骤 2：** 首次运行会提示设置管理员密码
+**步骤 2：** 全新安装会在服务日志中打印一次性管理员密码，并写入程序目录下的 `data/initial_admin_password.txt`
 
-**步骤 3：** 设置密码后，浏览器自动打开 `http://localhost:8000`
+**步骤 3：** 浏览器打开 `http://localhost:8000`，使用用户名 `admin` 和该一次性密码登录
 
-**步骤 4：** 使用账号 `admin` 和刚才设置的密码登录
+**步骤 4：** 系统要求立即设置新密码。完成后删除 `data/initial_admin_password.txt`
+
+生产环境请在启动前设置环境变量 `SECRET_KEY`（`DEBUG=false` 或 `APP_ENV=production` 时不设置将无法启动）。本地开发未设置时，会在 `data/.secret_key` 生成并复用一个密钥。
 
 ---
 
