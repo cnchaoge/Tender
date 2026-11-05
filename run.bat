@@ -17,7 +17,8 @@ if errorlevel 1 (
 echo.
 echo [2/2] Starting server...
 echo   Admin UI: http://localhost:8000/web
-echo   Login: admin / admin123
+echo   First install: the one-time admin password is printed below
+echo   and saved to data\initial_admin_password.txt
 echo.
 echo Press Ctrl+C to stop
 echo.

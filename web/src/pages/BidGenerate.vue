@@ -202,8 +202,74 @@
         </div>
       </div>
 
-      <!-- ── RIGHT: 素材选择 + 生成 ── -->
+      <!-- ── RIGHT: 模板选择 + 素材 + 生成 ── -->
       <div class="section">
+
+        <!-- 标书模板选择 -->
+        <div class="section-label">
+          标书模板
+          <span class="section-label-hint" v-if="selectedTemplate">已选：{{ selectedTemplate.name }}</span>
+        </div>
+        <div class="template-card">
+          <div class="template-list">
+            <div
+              v-for="tpl in templates"
+              :key="tpl.id"
+              class="template-item"
+              :class="{ active: selectedTemplateId === tpl.id }"
+              @click="selectTemplate(tpl)"
+            >
+              <div class="template-radio">
+                <span class="radio-dot" :class="{ checked: selectedTemplateId === tpl.id }"></span>
+              </div>
+              <div class="template-body">
+                <div class="template-name">{{ tpl.name }}</div>
+                <div class="template-desc">{{ tpl.description }}</div>
+                <div class="template-meta">
+                  <span>{{ tpl.chapters?.length || 0 }} 章</span>
+                  <span v-if="tpl.industry"> · {{ tpl.industry }}</span>
+                  <span class="template-strategy">策略：{{ tpl.default_strategy }}</span>
+                </div>
+              </div>
+              <el-button
+                v-if="selectedTemplateId === tpl.id"
+                size="small"
+                text
+                type="primary"
+                @click.stop="showTemplatePreview = true"
+              >
+                预览
+              </el-button>
+            </div>
+          </div>
+          <div class="template-none" @click="selectedTemplateId = null; selectedTemplate = null">
+            <span class="radio-dot" :class="{ checked: !selectedTemplateId }"></span>
+            <span>不使用模板（AI 自动规划章节）</span>
+          </div>
+        </div>
+
+        <!-- 模板章节预览弹窗 -->
+        <el-dialog
+          v-model="showTemplatePreview"
+          title="章节预览"
+          width="500px"
+          class="template-preview-dialog"
+        >
+          <div v-if="selectedTemplate" class="preview-chapters">
+            <div
+              v-for="(ch, idx) in selectedTemplate.chapters"
+              :key="idx"
+              class="preview-chapter-item"
+            >
+              <div class="preview-chapter-num">{{ idx + 1 }}</div>
+              <div class="preview-chapter-body">
+                <div class="preview-chapter-name">{{ ch.name }}</div>
+                <div class="preview-chapter-desc">{{ ch.description }}</div>
+                <div v-if="ch.key_points" class="preview-chapter-points">{{ ch.key_points }}</div>
+              </div>
+            </div>
+          </div>
+        </el-dialog>
 
         <!-- 素材选择 -->
         <div class="section-label">素材选择</div>
@@ -218,7 +284,18 @@
             >
               <el-checkbox :value="mat.id" :model-value="selectedMaterials.includes(mat.id)" />
               <div class="material-info">
-                <div class="material-name">{{ mat.filename }}</div>
+                <div class="material-name">
+                  {{ mat.filename }}
+                  <el-button
+                    v-if="mat.relevance_score != null"
+                    text
+                    size="small"
+                    class="preview-btn"
+                    @click.stop="openPreview(mat)"
+                  >
+                    预览
+                  </el-button>
+                </div>
                 <div class="material-meta">
                   <span class="meta-badge">{{ mat.file_type?.toUpperCase() }}</span>
                   <span v-if="mat.chunk_count" class="meta-chunks">{{ mat.chunk_count }} 个切片</span>
@@ -226,10 +303,11 @@
                   <span v-if="getMatchInfo(mat.id)" class="meta-score" :class="matchScoreClass(getMatchInfo(mat.id).level)">
                     匹配度 {{ getMatchInfo(mat.id).score }}%
                   </span>
-                  <!-- RAG 推荐相关度（原有字段） -->
+                  <!-- RAG 推荐相关度 + 匹配理由 -->
                   <span v-else-if="mat.relevance_score != null" class="meta-score" :class="scoreClass(mat.relevance_score)">
-                    相关度 {{ Math.round((1 - Math.abs(mat.relevance_score)) * 100) }}%
+                    匹配度 {{ Math.round(mat.relevance_score * 100) }}%
                   </span>
+                  <span v-if="mat.relevance_reason" class="meta-reason">{{ mat.relevance_reason }}</span>
                 </div>
               </div>
             </div>
@@ -389,10 +467,10 @@
               <span class="done-icon">✅</span>
               标书生成成功
             </div>
-            <a :href="generatedFile.url" target="_blank" class="download-btn">
+            <button type="button" class="download-btn" @click="downloadBidFile(generatedFile.name)">
               <el-icon><component :is="Download" /></el-icon>
               下载 {{ generatedFile.name }}
-            </a>
+            </button>
           </div>
 
           <!-- Done: Review -->
@@ -515,10 +593,10 @@
                   <el-button size="small" @click="showCompareDialog(v.id)">
                     对比
                   </el-button>
-                  <a v-if="v.file_path" :href="`${apiBase()}/api/bid/download/${getFilename(v.file_path)}`" target="_blank" class="version-download">
+                  <button v-if="v.file_path" type="button" class="version-download" @click="downloadBidFile(getFilename(v.file_path))">
                     <el-icon><component :is="Download" /></el-icon>
                     下载
-                  </a>
+                  </button>
                 </div>
               </div>
             </div>
@@ -570,35 +648,76 @@
         <el-button type="primary" @click="confirmPlanAndGenerate">确认并生成正文</el-button>
       </template>
     </el-dialog>
+
+    <!-- 投标材料检查清单 -->
+    <BidChecklistDialog
+      v-model="showChecklistDialog"
+      :bid-version-id="currentVersionId"
+      :bid-content="streamingContent"
+      :parse-result="parseResult"
+    />
+
+    <!-- 素材章节预览 -->
+    <el-dialog v-model="previewDialogVisible" title="相似章节" width="600px">
+      <div v-if="previewLoading" style="text-align:center;padding:40px">
+        <el-icon class="is-loading" size="20"><Loading /></el-icon>
+      </div>
+      <template v-else>
+        <div class="preview-header" v-if="previewData">
+          <span class="preview-filename">{{ previewData.filename }}</span>
+          <span class="preview-count" v-if="previewData.ranked">按相关度排序 · {{ previewData.section_count }} 个相似片段</span>
+          <span class="preview-count" v-else>共 {{ previewData.section_count }} 个章节/片段</span>
+        </div>
+        <div v-if="previewData?.sections?.length" class="preview-sections">
+          <div v-for="sec in previewData.sections" :key="sec.rank ?? sec.index" class="preview-section">
+            <div class="preview-section-header">
+              <span class="preview-section-num">相似 #{{ (sec.rank ?? sec.index) + 1 }}</span>
+              <span v-if="sec.section_name" class="preview-section-name">{{ sec.section_name }}</span>
+              <span v-if="sec.section_type" class="preview-section-type">{{ sec.section_type }}</span>
+              <span v-if="relevanceLabel(sec.score)" class="preview-section-type">{{ relevanceLabel(sec.score) }}</span>
+            </div>
+            <div class="preview-section-text">{{ sec.text }}</div>
+            <div class="preview-section-actions">
+              <el-button size="small" text @click="copySection(sec)">
+                引用此段
+              </el-button>
+            </div>
+          </div>
+        </div>
+        <el-empty v-else-if="!previewLoading" :image-size="60" :description="previewData?.message || '未找到与当前招标文件相似的章节'" />
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick, onMounted } from "vue"
 import { ElMessage } from "element-plus"
-import { Upload, Document, Files, Check, Download, ArrowRight, Plus } from "@element-plus/icons-vue"
+import { Upload, Document, Files, Check, Download, ArrowRight, Plus, Loading } from "@element-plus/icons-vue"
 import { useKbStore } from "../stores/kb"
-import api from "../api"
+import api, { bid, downloadWithAuth } from "../api"
 import { marked } from "marked"
+import BidChecklistDialog from "../components/BidChecklistDialog.vue"
+import { checklist as checklistApi } from "../api"
 // Configure marked for security (no async)
 // Configure marked for security (no async)
 marked.setOptions({ breaks: true, gfm: true })
 
 onMounted(() => {
+  loadTemplates()
   loadVersions()
 })
 
 const kbStore = useKbStore()
-// 统一 API 基础路径：dev 走相对路径（Vite proxy），prod 用完整 URL
-function apiBase() {
-  return import.meta.env.DEV ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000")
-}
 const bidFile = ref(null)
 const bidDocId = ref(null)  // 上传的招标文件 doc_id，不参与素材选择
 const parseResult = ref(null)
 const selectedMaterials = ref([])
 const generating = ref(false)
 const generatedFile = ref(null)
+const generatedContent = ref("")
+const currentVersionId = ref(null)
+const showChecklistDialog = ref(false)
 const reviewResult = ref(null)
 const progress = ref(0)
 const progressMessage = ref("")
@@ -613,8 +732,44 @@ const uploadingInline = ref(false)
 const inlineUploadRef = ref(null)
 const matchCheckResult = ref(null)  // 匹配度检测结果
 const checkingMatch = ref(false)
+const previewDialogVisible = ref(false)
+const previewData = ref(null)
+const previewLoading = ref(false)
 const planningChapters = ref([])    // 规划阶段章节列表
 const planDialogVisible = ref(false) // 规划阶段弹窗
+
+// 模板选择
+const templates = ref([])
+const selectedTemplateId = ref(null)
+const selectedTemplate = ref(null)
+const showTemplatePreview = ref(false)
+const loadingTemplates = ref(false)
+
+async function loadTemplates() {
+  loadingTemplates.value = true
+  try {
+    const resp = await api.get("/api/bid/templates")
+    templates.value = resp.data.templates || []
+  } catch {
+    // 静默失败
+  } finally {
+    loadingTemplates.value = false
+  }
+}
+
+function selectTemplate(tpl) {
+  if (selectedTemplateId.value === tpl.id) {
+    selectedTemplateId.value = null
+    selectedTemplate.value = null
+    return
+  }
+  selectedTemplateId.value = tpl.id
+  selectedTemplate.value = tpl
+  // 同步策略选择
+  if (tpl.default_strategy) {
+    selectedStrategy.value = tpl.default_strategy
+  }
+}
 const violationResult = ref(null)   // 废标项检测结果
 const plagiarismResult = ref(null)   // 标书查重结果
 const formatResult = ref(null)       // 格式检查结果
@@ -687,6 +842,10 @@ const availableMaterials = computed(() => {
       ? { ...recMap[doc.id], file_type: doc.file_type, chunk_count: doc.chunk_count }
       : { id: doc.id, filename: doc.filename, file_type: doc.file_type, chunk_count: doc.chunk_count })
   }
+  // 推荐模式下按相关度降序排列
+  if (hasRecommended) {
+    result.sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0))
+  }
   return result
 })
 
@@ -696,6 +855,27 @@ function scoreClass(score) {
   if (s > 0.85) return 'score-high'
   if (s > 0.7) return 'score-mid'
   return 'score-low'
+}
+
+function relevanceLabel(score) {
+  const n = Number(score)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return `相关度 ${Math.round(Math.min(1, n) * 100)}%`
+}
+
+function previewContext() {
+  const parsed = parseResult.value
+  if (!parsed) return {}
+  return {
+    parse_result: {
+      project_name: parsed.project_name || "",
+      deadline: parsed.deadline || "",
+      requirements: parsed.requirements || [],
+      qualification: parsed.qualification || [],
+      scoring: parsed.scoring || {},
+      technical_requirements: parsed.technical_requirements || parsed.tech_requirements || [],
+    },
+  }
 }
 
 // 匹配度颜色（用于 match_score 显示）
@@ -709,6 +889,39 @@ function matchScoreClass(level) {
 function getMatchInfo(docId) {
   if (!matchCheckResult.value) return null
   return matchCheckResult.value.materials.find(m => m.doc_id === docId) || null
+}
+
+// 一键引用章节内容
+function copySection(sec) {
+  const text = sec.section_name ? `【${sec.section_name}】\n${sec.text}` : sec.text
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success("已复制到剪贴板，可在生成前粘贴到提示词中")
+  }).catch(() => {
+    ElMessage.warning("复制失败，请手动选择文本")
+  })
+}
+
+// 素材章节预览
+async function openPreview(mat) {
+  if (mat.relevance_score == null && !mat.matched_excerpts) return
+  previewLoading.value = true
+  previewDialogVisible.value = true
+  previewData.value = null
+  try {
+    const resp = await bid.recommendPreview(mat.id, previewContext())
+    previewData.value = resp.data
+  } catch (e) {
+    const detail = e?.response?.data?.detail
+    previewData.value = {
+      filename: mat.filename,
+      sections: [],
+      section_count: 0,
+      ranked: false,
+      message: typeof detail === "string" ? detail : "相似章节加载失败",
+    }
+  } finally {
+    previewLoading.value = false
+  }
 }
 
 // 历史版本
@@ -794,6 +1007,16 @@ function formatDate(ts) {
 
 function getFilename(path) {
   return path ? path.split("/").pop() : ""
+}
+
+async function downloadBidFile(filename) {
+  if (!filename) return
+  try {
+    await downloadWithAuth(`/api/bid/download/${encodeURIComponent(filename)}`, filename)
+  } catch (e) {
+    if (e.status === 401) return
+    ElMessage.error(e.message || "下载失败")
+  }
 }
 
 function renderMarkdown(text) {
@@ -892,7 +1115,8 @@ async function handleGenerate() {
   try {
     const resp = await api.post("/api/bid/plan", {
       parse_result: parseResult.value,
-      materials: selectedMaterials.value
+      materials: selectedMaterials.value,
+      template_id: selectedTemplateId.value || null
     })
     planningChapters.value = resp.data.chapters || []
   } catch {
@@ -966,19 +1190,11 @@ async function doGenerate() {
   genCurrentStep.value = 1
 
   try {
-    const token = localStorage.getItem("token") || ""
-    const response = await fetch(`${apiBase()}/api/bid/generate/stream`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        parse_result: parseResult.value,
-        materials: selectedMaterials.value,
-        chapters: planningChapters.value,
-        strategy: selectedStrategy.value,
-      })
+    const response = await bid.openGenerateStream({
+      parse_result: parseResult.value,
+      materials: selectedMaterials.value,
+      chapters: planningChapters.value,
+      strategy: selectedStrategy.value,
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
@@ -1046,7 +1262,6 @@ async function doGenerate() {
             genCurrentStep.value = 5 // 完成
             generatedFile.value = {
               name: data.filename,
-              url: `${apiBase()}/api/bid/download/${data.filename}`,
             }
             reviewResult.value = data.review || null
             if (data.violation_result) violationResult.value = data.violation_result
@@ -1054,6 +1269,11 @@ async function doGenerate() {
             if (data.format_result) formatResult.value = data.format_result
             // 刷新历史版本列表
             loadVersions()
+            // 捕获 version_id 并自动弹出检查清单
+            currentVersionId.value = data.version_id
+            if (currentVersionId.value) {
+              showChecklistDialog.value = true
+            }
           }
         } catch {}
       }
@@ -1061,7 +1281,8 @@ async function doGenerate() {
     if (generatedFile.value) ElMessage.success("标书生成成功")
     else ElMessage.error("生成失败")
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || "生成失败")
+    if (e.status === 401) return
+    ElMessage.error(e.response?.data?.detail || e.message || "生成失败")
   } finally {
     generating.value = false
   }
@@ -1477,6 +1698,155 @@ async function doGenerate() {
   padding: 12px;
 }
 
+/* ── Template Card ── */
+.template-card {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+.template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.template-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-hairline);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.template-item:hover {
+  border-color: var(--color-primary);
+  background: rgba(59, 130, 246, 0.03);
+}
+.template-item.active {
+  border-color: var(--color-primary);
+  background: rgba(59, 130, 246, 0.06);
+}
+.template-radio {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.radio-dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--color-hairline-strong, #d0d5dd);
+  transition: all 0.15s;
+}
+.radio-dot.checked {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  box-shadow: inset 0 0 0 3px white;
+}
+.template-body {
+  flex: 1;
+  min-width: 0;
+}
+.template-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+  margin-bottom: 2px;
+}
+.template-desc {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  line-height: 1.4;
+  margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.template-meta {
+  font-size: 10px;
+  color: var(--color-ink-tertiary);
+}
+.template-strategy {
+  margin-left: 4px;
+  color: var(--color-primary);
+}
+.template-none {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-ink-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: all 0.15s;
+}
+.template-none:hover {
+  background: var(--color-surface-2);
+}
+.section-label-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-primary);
+  margin-left: 8px;
+}
+
+/* ── Template Preview Dialog ── */
+.preview-chapters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+.preview-chapter-item {
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-hairline);
+}
+.preview-chapter-num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.preview-chapter-body {
+  flex: 1;
+}
+.preview-chapter-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+  margin-bottom: 2px;
+}
+.preview-chapter-desc {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  margin-bottom: 2px;
+}
+.preview-chapter-points {
+  font-size: 11px;
+  color: var(--color-ink-tertiary);
+  background: var(--color-surface-2);
+  padding: 3px 6px;
+  border-radius: 3px;
+  margin-top: 2px;
+}
+
 /* ── Materials Card ── */
 .materials-card {
   background: var(--color-surface-1);
@@ -1596,6 +1966,85 @@ async function doGenerate() {
 .match-summary.has-warning {
   border-color: var(--color-semantic-warning);
   background: rgba(230, 162, 60, 0.05);
+}
+
+/* ██ 素材预览 ██ */
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-hairline);
+}
+.preview-filename {
+  font-size: 14px;
+  font-weight: 600;
+}
+.preview-count {
+  font-size: 12px;
+  color: var(--color-ink-tertiary);
+}
+.preview-sections {
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.preview-section {
+  padding: 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  background: var(--color-canvas);
+}
+.preview-section-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.preview-section-num {
+  font-size: 11px;
+  color: var(--color-ink-tertiary);
+  font-weight: 600;
+}
+.preview-section-name {
+  font-size: 12px;
+  font-weight: 500;
+}
+.preview-section-type {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--color-surface-2);
+  color: var(--color-ink-tertiary);
+}
+.preview-section-text {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.preview-btn {
+  font-size: 12px !important;
+  padding: 0 4px !important;
+  color: var(--color-primary) !important;
+}
+.preview-section-actions {
+  margin-top: 4px;
+  text-align: right;
+}
+.meta-reason {
+  font-size: 11px;
+  color: var(--color-primary);
+  background: rgba(94, 105, 209, 0.08);
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
 }
 .match-summary-title {
   font-size: 12px;
@@ -1996,6 +2445,8 @@ async function doGenerate() {
   display: flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
+  font: inherit;
   font-size: 13px;
   font-weight: 500;
   color: var(--color-ink);
@@ -2398,6 +2849,9 @@ async function doGenerate() {
   display: flex;
   align-items: center;
   gap: 4px;
+  cursor: pointer;
+  font: inherit;
+  background: transparent;
   font-size: 12px;
   color: var(--color-ink-subtle);
   text-decoration: none;

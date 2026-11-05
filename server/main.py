@@ -21,19 +21,34 @@ import threading
 
 from server.db.sqlite import init_db
 from server.db.violation_db import init_violation_db
-from server.api import auth, kb, rag, bid, admin
+from server.api import auth, kb, rag, bid, admin, price as price_api, checklist
+from server.api.bid import _init_builtin_templates
+from server.core.glossary import init_builtin_glossary
 
 
 def _init_all_dbs():
     """初始化所有数据库"""
     init_db()
     init_violation_db()
+    _init_builtin_templates()
+    init_builtin_glossary()
+    # In-process workers die with the server. Pick up rows left pending or
+    # processing by the previous process and discard any half-written chunks.
+    try:
+        from server.workers.document_worker import requeue_incomplete_documents
+        requeue_incomplete_documents()
+    except Exception as exc:
+        print(f"[KB] requeue incomplete documents failed: {exc}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _init_all_dbs()
-    yield
+    try:
+        yield
+    finally:
+        from server.workers.executor import shutdown_executor
+        shutdown_executor(wait=False)
 
 
 # PyInstaller 打包后的资源路径
@@ -59,11 +74,14 @@ app.include_router(kb.router)
 app.include_router(rag.router)
 app.include_router(bid.router)
 app.include_router(admin.router)
+app.include_router(price_api.router)
+app.include_router(checklist.router)
 
-# 静态文件（前端dist）
+# 静态文件（前端dist）。assets 目录在未构建时可能不存在，不能因此让应用无法启动。
 WEB_DIST = _get_resource_path("web/dist")
-if WEB_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="assets")
+_assets_dir = WEB_DIST / "assets"
+if _assets_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
 # 使用说明文档（Markdown + Docsify）
 DOCS_DIR = _get_resource_path("docs")
@@ -103,6 +121,22 @@ async def spa_fallback(path: str):
     return FileResponse(str(WEB_DIST / "index.html"))
 
 
+def _cleanup_port(port: int):
+    """启动前清理旧进程，避免端口占用"""
+    import subprocess, signal
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True, text=True, timeout=5
+        )
+        for pid in result.stdout.strip().splitlines():
+            pid = pid.strip()
+            if pid:
+                os.kill(int(pid), signal.SIGKILL)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # uvicorn 服务线程管理
 # ---------------------------------------------------------------------------
@@ -122,7 +156,6 @@ def _run_server():
         log_level="info",
     )
     server = uvicorn.Server(config)
-    _server_stop_event.set()
     # uvicorn.run() 是阻塞的，直到 stop() 被调用
     import asyncio
     asyncio.run(server.serve())
@@ -155,14 +188,19 @@ def _tray_restart_callback(stop=False):
 
 
 def _setup_tray():
-    from server.core.tray import setup_tray
-    setup_tray(_tray_restart_callback)
+    try:
+        from server.core.tray import setup_tray
+        setup_tray(_tray_restart_callback)
+    except ImportError:
+        pass  # pystray not installed (macOS/Linux)
 
 
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    from server.config import get_settings
+    _cleanup_port(get_settings().PORT)
     _start_server_thread()
     _setup_tray()
 

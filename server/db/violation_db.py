@@ -212,7 +212,7 @@ def init_violation_db():
     # 插入数据（violation_cases 8字段，disqualify_rules 7字段）
     cur.executemany("""
         INSERT INTO violation_cases
-        (category, sub_category, keyword, case_title, case_desc, penalty, legal_basis, severity)
+        (category, sub_category, keyword, case_title, case_desc, penalty, fix_suggestion, severity)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, violation_cases)
 

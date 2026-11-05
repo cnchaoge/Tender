@@ -6,26 +6,205 @@ import uuid
 import json
 import difflib
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from pathlib import Path
 from docx import Document as DocxDocument
-from docx.shared import Pt, Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt, Inches, RGBColor, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from datetime import datetime
+
+from server.deps import get_current_user
 
 
-def _set_run_font(run):
-    """设置 run 为宋体"""
-    run.font.name = "宋体"
+# ════════════════════════════════════════════════════════════════════════
+# 专业排版导出
+# ════════════════════════════════════════════════════════════════════════
+
+def _set_run_font(run, font_name="宋体", size_pt=None, bold=False, color=None):
+    """设置 run 字体属性"""
+    run.font.name = font_name
     rpr = run._element.get_or_add_rPr()
     rFonts = rpr.get_or_add_rFonts()
-    rFonts.set(qn("w:eastAsia"), "宋体")
+    rFonts.set(qn("w:eastAsia"), font_name)
+    if size_pt:
+        run.font.size = Pt(size_pt)
+    if bold:
+        run.font.bold = True
+    if color:
+        run.font.color.rgb = color
+
+
+def _setup_styles(doc):
+    """配置文档默认样式"""
+    style = doc.styles['Normal']
+    style.font.name = '宋体'
+    style.font.size = Pt(12)
+    style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+    pf = style.paragraph_format
+    pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+    pf.space_before = Pt(0)
+    pf.space_after = Pt(3)
+    for level, (size, bold) in {1: (22, True), 2: (16, True), 3: (14, True)}.items():
+        hs = doc.styles[f'Heading {level}']
+        hs.font.name = '黑体'
+        hs.font.size = Pt(size)
+        hs.font.bold = bold
+        hs.font.color.rgb = RGBColor(0, 0, 0)
+        hs.element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
+        hs.paragraph_format.space_before = Pt(12)
+        hs.paragraph_format.space_after = Pt(6)
+
+
+def _add_cover_page(doc, title, company_name, date_str):
+    """生成专业封面页（独立节，不显示页眉页脚）"""
+    section = doc.sections[0]
+    section.top_margin = Cm(3.5)
+    section.bottom_margin = Cm(2.5)
+    section.left_margin = Cm(2.5)
+    section.right_margin = Cm(2.5)
+    for _ in range(6):
+        doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("投 标 文 件")
+    _set_run_font(r, font_name="黑体", size_pt=26, bold=True)
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("━" * 30)
+    _set_run_font(r, color=RGBColor(0x99, 0x99, 0x99))
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("项目名称：")
+    _set_run_font(r, size_pt=16)
+    r2 = p.add_run(title)
+    _set_run_font(r2, font_name="黑体", size_pt=16, bold=True)
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("投标单位：")
+    _set_run_font(r, size_pt=14)
+    r2 = p.add_run(company_name)
+    _set_run_font(r2, size_pt=14, bold=True)
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(date_str)
+    _set_run_font(r, size_pt=14)
+    # 封面后的分节符
+    doc.add_section()
+    new_section = doc.sections[-1]
+    new_section.top_margin = Cm(2.5)
+    new_section.bottom_margin = Cm(2.5)
+    new_section.left_margin = Cm(2.5)
+    new_section.right_margin = Cm(2.5)
+    new_section.header.is_linked_to_previous = False
+    new_section.footer.is_linked_to_previous = False
+
+
+def _add_toc(doc):
+    """插入目录页（TOC 域代码）"""
+    p = doc.add_paragraph()
+    r = p.add_run("目  录")
+    _set_run_font(r, font_name="黑体", size_pt=22, bold=True)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph()
+    para = doc.add_paragraph()
+    run1 = para.add_run()
+    fld_char_begin = OxmlElement('w:fldChar')
+    fld_char_begin.set(qn('w:fldCharType'), 'begin')
+    run1._element.append(fld_char_begin)
+    run2 = para.add_run()
+    instr = OxmlElement('w:instrText')
+    instr.set(qn('xml:space'), 'preserve')
+    instr.text = ' TOC \\o "1-3" \\h \\z \\u '
+    run2._element.append(instr)
+    run3 = para.add_run()
+    fld_char_sep = OxmlElement('w:fldChar')
+    fld_char_sep.set(qn('w:fldCharType'), 'separate')
+    run3._element.append(fld_char_sep)
+    run4 = para.add_run("（目录，请在 Word 中按 Ctrl+A → F9 刷新）")
+    _set_run_font(run4, size_pt=12, color=RGBColor(0x99, 0x99, 0x99))
+    run5 = para.add_run()
+    fld_char_end = OxmlElement('w:fldChar')
+    fld_char_end.set(qn('w:fldCharType'), 'end')
+    run5._element.append(fld_char_end)
+    doc.add_page_break()
+
+
+def _setup_header_footer(doc, title):
+    """设置正文节的页眉页脚"""
+    section = doc.sections[-1]
+    header = section.header
+    header.is_linked_to_previous = False
+    hp = header.paragraphs[0]
+    hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = hp.add_run(title)
+    _set_run_font(r, size_pt=9, color=RGBColor(0x66, 0x66, 0x66))
+    footer = section.footer
+    footer.is_linked_to_previous = False
+    fp = footer.paragraphs[0]
+    fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r1 = fp.add_run("第 ")
+    _set_run_font(r1, size_pt=9, color=RGBColor(0x66, 0x66, 0x66))
+    run_page = fp.add_run()
+    fld_begin = OxmlElement('w:fldChar')
+    fld_begin.set(qn('w:fldCharType'), 'begin')
+    run_page._element.append(fld_begin)
+    instr_page = OxmlElement('w:instrText')
+    instr_page.set(qn('xml:space'), 'preserve')
+    instr_page.text = ' PAGE '
+    run_page._element.append(instr_page)
+    fld_sep = OxmlElement('w:fldChar')
+    fld_sep.set(qn('w:fldCharType'), 'separate')
+    run_page._element.append(fld_sep)
+    fld_end = OxmlElement('w:fldChar')
+    fld_end.set(qn('w:fldCharType'), 'end')
+    run_page._element.append(fld_end)
+    r2 = fp.add_run(" 页 / 共 ")
+    _set_run_font(r2, size_pt=9, color=RGBColor(0x66, 0x66, 0x66))
+    run_total = fp.add_run()
+    fld_begin2 = OxmlElement('w:fldChar')
+    fld_begin2.set(qn('w:fldCharType'), 'begin')
+    run_total._element.append(fld_begin2)
+    instr_total = OxmlElement('w:instrText')
+    instr_total.set(qn('xml:space'), 'preserve')
+    instr_total.text = ' NUMPAGES '
+    run_total._element.append(instr_total)
+    fld_sep2 = OxmlElement('w:fldChar')
+    fld_sep2.set(qn('w:fldCharType'), 'separate')
+    run_total._element.append(fld_sep2)
+    fld_end2 = OxmlElement('w:fldChar')
+    fld_end2.set(qn('w:fldCharType'), 'end')
+    run_total._element.append(fld_end2)
+    r3 = fp.add_run(" 页")
+    _set_run_font(r3, size_pt=9, color=RGBColor(0x66, 0x66, 0x66))
+
+
+def _resolve_image_path(img_path: str) -> Optional[Path]:
+    """解析 markdown 图片路径为实际文件路径"""
+    from server.config import BASE_DIR, UPLOADS_DIR
+    p = Path(img_path)
+    if p.is_absolute() and p.exists():
+        return p
+    candidates = [
+        BASE_DIR / p,
+        UPLOADS_DIR / p.name,
+        Path.cwd() / p,
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
 
 
 def _render_markdown_to_docx(doc: DocxDocument, content: str):
-    """将 markdown 内容渲染到 docx 文档（支持表格/标题/列表/段落）"""
+    """将 markdown 内容渲染到 docx 文档（支持表格/标题/列表/段落/图片）"""
     lines = content.split("\n")
     i = 0
 
@@ -45,9 +224,31 @@ def _render_markdown_to_docx(doc: DocxDocument, content: str):
                 heading = doc.add_heading(m.group(2), level=min(level, 3))
                 heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 for run in heading.runs:
-                    _set_run_font(run)
+                    _set_run_font(run, font_name="黑体")
                 i += 1
                 continue
+
+        # 图片 ![alt](path)
+        img_match = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)$", line)
+        if img_match:
+            img_path = img_match.group(2).strip()
+            abs_path = _resolve_image_path(img_path)
+            if abs_path and abs_path.exists():
+                try:
+                    para = doc.add_paragraph()
+                    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = para.add_run()
+                    run.add_picture(str(abs_path), width=Inches(5.5))
+                except Exception:
+                    p = doc.add_paragraph()
+                    r = p.add_run(f"[图片：{img_match.group(1)}]")
+                    _set_run_font(r, color=RGBColor(0x99, 0x99, 0x99))
+            else:
+                p = doc.add_paragraph()
+                r = p.add_run(f"[图片：{img_match.group(1)}]")
+                _set_run_font(r, color=RGBColor(0x99, 0x99, 0x99))
+            i += 1
+            continue
 
         # 表格
         if "|" in line:
@@ -61,7 +262,7 @@ def _render_markdown_to_docx(doc: DocxDocument, content: str):
                     i += 1
                     continue
                 cells = [c.strip() for c in stripped.split("|") if c.strip() is not None]
-                cells = [c for c in cells if c]  # 过滤空单元格
+                cells = [c for c in cells if c]
                 if cells:
                     rows.append(cells)
                 i += 1
@@ -73,8 +274,19 @@ def _render_markdown_to_docx(doc: DocxDocument, content: str):
                         cell = tbl.rows[ri].cells[ci]
                         cell.text = cell_text
                         for p in cell.paragraphs:
+                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             for run in p.runs:
-                                _set_run_font(run)
+                                _set_run_font(run, size_pt=10)
+                    # 表头样式：加粗 + 灰底
+                    if ri == 0:
+                        for cell in tbl.rows[0].cells:
+                            for p in cell.paragraphs:
+                                for run in p.runs:
+                                    run.font.bold = True
+                            shading = OxmlElement('w:shd')
+                            shading.set(qn('w:fill'), 'D9E2F3')
+                            shading.set(qn('w:val'), 'clear')
+                            cell._tc.get_or_add_tcPr().append(shading)
             continue
 
         # 列表
@@ -121,27 +333,39 @@ def _render_markdown_to_docx(doc: DocxDocument, content: str):
 
 
 def _docx_from_markdown(content: str, title: str = "投标标书") -> DocxDocument:
-    """将 markdown 字符串转为 docx Document 对象"""
+    """将 markdown 字符串转为专业排版的 docx Document 对象"""
+    from server.config import get_settings as _get_settings
+    _settings = _get_settings()
+    company_name = _settings.COMPANY_NAME or "投标单位名称"
+    date_str = datetime.now().strftime("%Y 年 %m 月 %d 日")
     doc = DocxDocument()
-    doc.add_heading(title, 0)
+    _setup_styles(doc)
+    _add_cover_page(doc, title, company_name, date_str)
+    _add_toc(doc)
+    _setup_header_footer(doc, title)
     _render_markdown_to_docx(doc, content)
     return doc
 
 from server.config import GENERATED_DIR, get_settings
 from server.db.sqlite import get_db
 from server.core.retriever.retriever import retrieve
+from server.core.retriever.section_query import build_section_retrieval_query, collect_section_materials
 from server.core.generator.llm import get_generator
-from server.core.reviewer import review_bid, _check_format_compliance
+from server.core.bidgen.pipeline import (
+    BidDraftPipeline,
+    chapter_lookup,
+    format_scoring as _format_scoring,
+    match_heading_chapter,
+)
+from server.core.reviewer import _check_format_compliance
 from server.tools.violation_checker import get_violation_checker
 from server.tools.plagiarism_checker import get_plagiarism_checker
-from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, Resp
+from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, BidTemplateCreateReq, BidTemplateUpdateReq, Resp
 
-router = APIRouter(prefix="/api/bid", tags=["标书生成"])
+router = APIRouter(prefix="/api/bid", tags=["标书生成"], dependencies=[Depends(get_current_user)])
 settings = get_settings()
 
-SYSTEM_PROMPT = """你是一个专业的招投标文档专家，擅长分析招标文件并生成投标标书。"""
 
- 
 def _json_clean(raw: str) -> str:
     """去掉 markdown json 包装（```json ... ```）"""
     raw = raw.strip()
@@ -363,17 +587,44 @@ def parse_bid_file(req: BidParseReq):
                 req0 = requirements[0] if requirements else ""
                 if project_name and req0:
                     query = f"{project_name} {req0}"
-                    chunks = retrieve(query, top_k=3)
-                    doc_ids_seen = set()
+                    chunks = retrieve(query, top_k=5)
+                    doc_groups = {}
                     for chunk in chunks:
                         doc_id = chunk.get("doc_id")
-                        if doc_id and doc_id not in doc_ids_seen:
-                            doc_ids_seen.add(doc_id)
-                            recommended_materials.append({
+                        if not doc_id:
+                            continue
+                        if doc_id not in doc_groups:
+                            doc_groups[doc_id] = {
                                 "id": doc_id,
                                 "filename": chunk.get("filename", ""),
-                                "relevance_score": round(chunk.get("score", 0.0), 2)
-                            })
+                                "scores": [],
+                                "chunks": [],
+                            }
+                        doc_groups[doc_id]["scores"].append(chunk.get("score", 0.0))
+                        if len(doc_groups[doc_id]["chunks"]) < 2:
+                            doc_groups[doc_id]["chunks"].append(chunk.get("text", "")[:200])
+
+                    for doc_id, group in doc_groups.items():
+                        avg_score = sum(group["scores"]) / len(group["scores"]) if group["scores"] else 0
+                        # 用匹配到的关键词片段生成推荐理由
+                        query_keywords = [w for w in query.split() if len(w) > 1]
+                        matched_keywords = []
+                        for c in group["chunks"]:
+                            for kw in query_keywords:
+                                if kw in c:
+                                    matched_keywords.append(kw)
+                                    break
+                        reason = f"匹配项目：{', '.join(matched_keywords[:3])}" if matched_keywords else "内容相似"
+                        recommended_materials.append({
+                            "id": doc_id,
+                            "filename": group["filename"],
+                            "relevance_score": round(avg_score, 2),
+                            "relevance_reason": reason,
+                            "matched_count": len(group["scores"]),
+                            "matched_excerpts": group["chunks"],
+                        })
+                    # 按相关度降序
+                    recommended_materials.sort(key=lambda m: m["relevance_score"], reverse=True)
             except Exception:
                 pass
 
@@ -406,60 +657,72 @@ def parse_bid_file(req: BidParseReq):
         )
 
 
-def _format_scoring(scoring: dict) -> str:
-    """把 scoring dict 格式化为 prompt 友好文本"""
-    if not scoring:
-        return "未提供评分标准"
-    method = scoring.get("method", "未知")
-    sections = scoring.get("sections", [])
-    disqualify = scoring.get("disqualify_conditions", [])
+def _load_material_docs(doc_ids: list) -> list[dict]:
+    """按素材 ID 读取文件名。缺失的文档直接跳过。"""
+    if not doc_ids:
+        return []
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        docs = []
+        for doc_id in doc_ids:
+            cur.execute("SELECT id, filename FROM documents WHERE id = ?", (doc_id,))
+            row = cur.fetchone()
+            if row:
+                docs.append({"id": row["id"], "filename": row["filename"]})
+        return docs
+    finally:
+        conn.close()
 
-    lines = [f"评标办法：{method}"]
-    for section in sections:
-        lines.append(f"  {section.get('name', '评分项')}（权重{section.get('weight', 0)}%）：")
-        for item in section.get("items", []):
-            item_name = item.get("name", "")
-            score = item.get("score", 0)
-            max_score = item.get("max_score", 0)
-            item_type = item.get("type", "expert")
-            formula = item.get("formula", "")
-            disqualify_if_fail = item.get("disqualify_if_fail", False)
-            item_req = "；".join(item.get("requirements", []))
 
-            type_desc = {"expert": "专家打分", "formula": "公式计算", "qualified": "满足即得分"}.get(item_type, item_type)
-            disqualify_str = "（不满足则废标）" if disqualify_if_fail else ""
-            formula_str = f"，公式：{formula}" if formula else ""
-            req_str = f"，{item_req}" if item_req else ""
-
-            lines.append(f"    - {item_name}：{score}/{max_score}分，{type_desc}{formula_str}{disqualify_str}{req_str}")
-
-    if disqualify:
-        lines.append(f"  废标条件：{'；'.join(disqualify)}")
-
-    return "\n".join(lines)
+def _retrieve_materials_text(
+    parse_result: dict,
+    materials,
+    chapters=None,
+    per_doc_k: Optional[int] = None,
+    max_chars: int = 6000,
+) -> str:
+    """按章节检索选中素材。流式与非流式生成共用这一条路径。"""
+    docs = _load_material_docs(list(materials or []))
+    return collect_section_materials(
+        docs,
+        parse_result or {},
+        chapters,
+        retrieve_fn=retrieve,
+        per_doc_k=per_doc_k,
+        max_chars=max_chars,
+    )
 
 
 @router.post("/plan", response_model=BidPlanResp)
 def plan_bid(req: BidPlanReq):
     """生成标书目录大纲（规划阶段）"""
+
+    # 如果指定了模板，直接返回模板定义的章节
+    if req.template_id:
+        import json
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT chapters FROM bid_templates WHERE id = ?", (req.template_id,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            try:
+                chapters_data = json.loads(row["chapters"])
+                chapters_with_status = [
+                    {"index": idx, "name": ch.get("name", ""), "description": ch.get("description", ""), "status": "pending", "key_points": ch.get("key_points", "")}
+                    for idx, ch in enumerate(chapters_data)
+                ]
+                return BidPlanResp(chapters=chapters_with_status)
+            except (json.JSONDecodeError, KeyError):
+                pass  # 模板数据异常，降级到 LLM 生成
+
     generator = get_generator()
 
-    # 检索相关素材摘要
-    materials_text = ""
-    if req.materials:
-        conn = get_db()
-        for doc_id in req.materials:
-            cur = conn.cursor()
-            cur.execute("SELECT filename FROM documents WHERE id = ?", (doc_id,))
-            row = cur.fetchone()
-            if row:
-                chunks = retrieve(
-                    f"招标文件：{req.parse_result.get('project_name', '')} {req.parse_result.get('deadline', '')}",
-                    top_k=2, doc_ids=[doc_id]
-                )
-                for chunk in chunks:
-                    materials_text += f"[{row['filename']}]\n{chunk['text'][:500]}\n\n"
-        conn.close()
+    # 规划阶段还没有章节，用招标要求与评分项做文档级检索，而不是只查项目名和工期。
+    materials_text = _retrieve_materials_text(
+        req.parse_result, req.materials, per_doc_k=2, max_chars=2000
+    )
 
     scoring_text = _format_scoring(req.parse_result.get("scoring", {}))
 
@@ -520,81 +783,33 @@ def plan_bid(req: BidPlanReq):
         return BidPlanResp(chapters=chapters_with_status)
 
 
-@router.post("/generate", response_model=dict)
-def generate_bid(req: BidGenerateReq):
-    """根据招标文件生成标书（带 AI 质检，非流式）"""
-    generator = get_generator()
-
-    # 检索相关素材
-    materials_text = ""
-    if req.materials:
-        conn = get_db()
-        cur = conn.cursor()
-        for doc_id in req.materials:
-            cur.execute("SELECT filename, id FROM documents WHERE id = ?", (doc_id,))
-            row = cur.fetchone()
-            if row:
-                # 注意：parse_result 是 dict，直接 stringify 传入 retrieve
-                query_for_retrieve = f"招标文件：{req.parse_result.get('project_name', '')} {req.parse_result.get('deadline', '')}"
-                chunks = retrieve(query_for_retrieve, top_k=3, doc_ids=[doc_id])
-                for chunk in chunks:
-                    materials_text += f"[{row['filename']}]\n{chunk['text']}\n\n"
-        conn.close()
-
-    # 检查是否需要 raw_text 降级
-    raw_text = req.parse_result.get("raw_text", "")
-    project_name = req.parse_result.get("project_name", "")
-    confidence = req.parse_result.get("parse_meta", {}).get("confidence", 1.0)
-    use_raw_fallback = (
-        "未识别" in project_name
-        or "解析失败" in project_name
-        or confidence < 0.5
-    )
-
-    bid_info = f"""招标文件：
-- 项目名称：{project_name}
-- 工期：{req.parse_result.get("deadline", "")}
-- 资格要求：{", ".join(req.parse_result.get("requirements", []))}
-- 资质要求：{", ".join(req.parse_result.get("qualification", []))}
-- {_format_scoring(req.parse_result.get("scoring", {}))}"""
-
-    # 降级：confidence 低于阈值时，把 raw_text 直接附在后面让 LLM 再读
-    if use_raw_fallback and raw_text:
-        bid_info += f"\n\n【原文内容】（解析结果不可信，请直接阅读原文提取关键信息）：\n{raw_text[:3000]}"
-
-    prompt = f"""根据以下招标文件要求和素材，生成一份投标标书。
-
-{bid_info}
-
-可用素材：
-{materials_text[:5000] if materials_text else "无"}
-
-请生成完整的投标标书，包含：
-1. 投标函
-2. 资格审查文件
-3. 技术标
-4. 商务标
-
-输出格式：Markdown"""
-
-    # 第一轮生成
-    content = generator.generate(prompt, system=SYSTEM_PROMPT)
-
-    # AI 质检
-    review = review_bid(content, req.parse_result)
-
-    # 质检未通过，根据建议重新生成一轮
-    if not review["passed"]:
-        review_note = "\n\n[审核意见] " + "；".join(review.get("suggestions", []))
-        retry_prompt = prompt + review_note
-        content = generator.generate(retry_prompt, system=SYSTEM_PROMPT)
-
-    # 转为 Word
-    doc = _docx_from_markdown(content, req.parse_result.get("project_name", "投标标书"))
-
+def _write_bid_docx(content: str, title: str) -> Path:
+    """两条生成接口共用的 Word 落盘。"""
+    doc = _docx_from_markdown(content, title)
     output_path = GENERATED_DIR / f"bid_{uuid.uuid4().hex[:8]}.docx"
     doc.save(str(output_path))
+    return output_path
 
+
+@router.post("/generate", response_model=dict)
+def generate_bid(req: BidGenerateReq):
+    """根据招标文件生成标书（带 AI 质检，非流式）。正文生成走 BidDraftPipeline。"""
+    generator = get_generator()
+
+    # 按章节检索素材：查询包含章节标题/用途，以及与该章相关的技术要求和评分项。
+    materials_text = _retrieve_materials_text(
+        req.parse_result, req.materials, req.chapters
+    )
+    pipe = BidDraftPipeline(generator, req.parse_result, materials_text, req.strategy)
+    for _delta in pipe.iter_deltas(stream=False):
+        pass
+    review = pipe.review_draft()
+    # 与原非流式接口一致：重写后仍返回首轮质检，不把第二轮结果写进响应。
+    if pipe.needs_retry():
+        for _delta in pipe.iter_deltas(stream=False):
+            pass
+
+    output_path = _write_bid_docx(pipe.content, req.parse_result.get("project_name", "投标标书"))
     return {
         "file_path": str(output_path),
         "filename": output_path.name,
@@ -611,104 +826,26 @@ def _sse_event(data: dict, event: str = "message") -> bytes:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
 
 
-def _get_strategy_guidance(strategy: str) -> str:
-    """根据策略返回对应的投标策略指导文本"""
-    strategies = {
-        "技术优先型": "【投标策略】：技术优先型\n- 侧重技术方案完整性、创新点、工程质量保障措施\n- 技术标内容要详细、专业，突出企业技术优势和施工能力\n- 适当弱化价格因素，以技术方案得分最大化为目标\n- 注重施工工艺、质量控制体系、安全文明施工等章节的深度",
-        "成本控制型": "【投标策略】：成本控制型\n- 侧重成本优化、施工方案经济性、项目利润最大化\n- 在满足招标要求的前提下，尽量压缩成本，提高利润率\n- 报价策略优先，采用有竞争力的价格策略\n- 技术方案以「合格」为标准，不过度展开，简明扼要即可",
-        "综合均衡型": "【投标策略】：综合均衡型\n- 技术和价格平衡，在满足招标要求的前提下追求性价比最优\n- 技术方案完整、专业，但不过度冗余\n- 报价合理有竞争力，既不过高也不恶性低价\n- 标书整体均衡、专业、完整，能满足评标的各方面要求",
-    }
-    return strategies.get(strategy, strategies["综合均衡型"])
-
-
 @router.post("/generate/stream")
 async def generate_bid_stream(req: BidGenerateReq):
-    """SSE 流式生成标书，逐步推送进度"""
+    """SSE 流式生成标书。组 prompt、调用模型和质检重写与非流式接口共用 BidDraftPipeline。"""
     generator = get_generator()
 
-    # 检索相关素材
-    materials_text = ""
-    if req.materials:
-        conn = get_db()
-        cur = conn.cursor()
-        for doc_id in req.materials:
-            cur.execute("SELECT filename, id FROM documents WHERE id = ?", (doc_id,))
-            row = cur.fetchone()
-            if row:
-                query_for_retrieve = f"招标文件：{req.parse_result.get('project_name', '')} {req.parse_result.get('deadline', '')}"
-                chunks = retrieve(query_for_retrieve, top_k=3, doc_ids=[doc_id])
-                for chunk in chunks:
-                    materials_text += f"[{row['filename']}]\n{chunk['text']}\n\n"
-        conn.close()
-
-    # 检查是否需要 raw_text 降级
-    raw_text = req.parse_result.get("raw_text", "")
-    project_name = req.parse_result.get("project_name", "")
-    confidence = req.parse_result.get("parse_meta", {}).get("confidence", 1.0)
-    use_raw_fallback = (
-        "未识别" in project_name
-        or "解析失败" in project_name
-        or confidence < 0.5
+    # 与非流式生成共用按章节检索，避免流式路径仍只用项目名和工期。
+    materials_text = _retrieve_materials_text(
+        req.parse_result, req.materials, req.chapters
     )
-
-    bid_info = f"""招标文件：
-- 项目名称：{project_name}
-- 工期：{req.parse_result.get("deadline", "")}
-- 资格要求：{", ".join(req.parse_result.get("requirements", []))}
-- 资质要求：{", ".join(req.parse_result.get("qualification", []))}
-- {_format_scoring(req.parse_result.get("scoring", {}))}"""
-
-    # 降级：confidence 低于阈值时，把 raw_text 直接附在后面让 LLM 再读
-    if use_raw_fallback and raw_text:
-        bid_info += f"\n\n【原文内容】（解析结果不可信，请直接阅读原文提取关键信息）：\n{raw_text[:3000]}"
-
-    prompt = f"""根据以下招标文件要求和素材，生成一份投标标书。
-
-{bid_info}
-
-{_get_strategy_guidance(req.strategy)}
-
-可用素材：
-{materials_text[:5000] if materials_text else "无"}
-
-请生成完整的投标标书，包含：
-1. 投标函
-2. 资格审查文件
-3. 技术标
-4. 商务标
-
-输出格式：Markdown"""
+    pipe = BidDraftPipeline(generator, req.parse_result, materials_text, req.strategy)
 
     async def stream_response():
         chapters = req.chapters or []
-        chapter_status = {ch.get("index", i): {"name": ch.get("name", ""), "status": "pending", "progress": 0} for i, ch in enumerate(chapters)}
-
-        def _emit_chapter_start(idx, name):
-            yield _sse_event({"stage": "chapter_start", "chapter_index": idx, "chapter_name": name})
-
-        def _emit_chapter_done(idx, name):
-            yield _sse_event({"stage": "chapter_done", "chapter_index": idx, "chapter_name": name})
-
-        def _emit_chapter_progress(idx, name, progress):
-            yield _sse_event({"stage": "chapter_progress", "chapter_index": idx, "chapter_name": name, "progress": progress})
-
-        # Chapter name → index map (for matching headings)
-        chapter_name_to_idx = {}
-        for ch in chapters:
-            name = ch.get("name", "")
-            # strip chapter number prefix like "第一章 " → "技术标"
-            for suffix in ["第一章 ", "第二章 ", "第三章 ", "第四章 ", "第五章 ", "第六章 ", "第七章 ", "第八章 ", "第九章 ", "第十章 ", "第1章 ", "第2章 ", "第3章 ", "第4章 ", "第5章 "]:
-                if name.startswith(suffix):
-                    name = name[len(suffix):]
-                    break
-            chapter_name_to_idx[name] = ch.get("index", 0)
-
+        chapter_name_to_idx = chapter_lookup(chapters)
         active_chapter_idx = None
         active_chapter_name = ""
 
         # 阶段0：生成前废标项预检
         yield _sse_event({"stage": "violation_check", "progress": 5, "message": "正在检测废标项风险..."})
-        
+
         # 废标项检查（generate 阶段：检测标书正文是否满足招标文件要求）
         violation_checker = get_violation_checker()
         violation_result = None
@@ -734,38 +871,39 @@ async def generate_bid_stream(req: BidGenerateReq):
         # 阶段1：生成中
         yield _sse_event({"stage": "generating", "progress": 10, "message": "正在生成标书正文..."})
 
-        content_parts = []
-        for delta in generator.generate_stream(prompt, system=SYSTEM_PROMPT):
-            content_parts.append(delta)
-
+        for delta in pipe.iter_deltas(stream=True):
             # Detect chapter headings from delta (markdown headings like "# 投标函" or "## 第一章 投标函")
-            heading_match = re.match(r"^(#{1,4})\s+(.+?)\n", delta)
-            if heading_match and chapters:
-                heading_text = heading_match.group(2).strip()
-                # Check if this heading matches a known chapter
-                for ch_name, ch_idx in chapter_name_to_idx.items():
-                    if ch_name in heading_text or heading_text in ch_name:
-                        if active_chapter_idx != ch_idx:
-                            # Emit chapter_done for previous chapter
-                            if active_chapter_idx is not None:
-                                for _ in _emit_chapter_done(active_chapter_idx, active_chapter_name):
-                                    yield _
-                            # Emit chapter_start for new chapter
-                            active_chapter_idx = ch_idx
-                            active_chapter_name = ch_name
-                            for _ in _emit_chapter_start(ch_idx, ch_name):
-                                yield _
-                        break
+            if chapters:
+                matched = match_heading_chapter(delta, chapter_name_to_idx)
+                if matched:
+                    ch_idx, ch_name = matched
+                    if active_chapter_idx != ch_idx:
+                        if active_chapter_idx is not None:
+                            yield _sse_event({
+                                "stage": "chapter_done",
+                                "chapter_index": active_chapter_idx,
+                                "chapter_name": active_chapter_name,
+                            })
+                        active_chapter_idx = ch_idx
+                        active_chapter_name = ch_name
+                        yield _sse_event({
+                            "stage": "chapter_start",
+                            "chapter_index": ch_idx,
+                            "chapter_name": ch_name,
+                        })
 
             # 估算进度 10-60%
             yield _sse_event({"stage": "generating", "progress": 30, "message": "生成中...", "delta": delta})
 
-        content = "".join(content_parts)
+        content = pipe.content
 
         # Mark last active chapter as done
         if active_chapter_idx is not None:
-            for _ in _emit_chapter_done(active_chapter_idx, active_chapter_name):
-                yield _
+            yield _sse_event({
+                "stage": "chapter_done",
+                "chapter_index": active_chapter_idx,
+                "chapter_name": active_chapter_name,
+            })
 
         # ── 阶段2：废标项检测（基于生成的标书正文）───────────────────────
         yield _sse_event({"stage": "violation_check", "progress": 65, "message": "废标项合规性检测..."})
@@ -778,25 +916,19 @@ async def generate_bid_stream(req: BidGenerateReq):
                     "message": "存在废标风险项，请留意",
                     "violation_result": violation_result,
                 })
-        
+
         # 阶段3：质检
         yield _sse_event({"stage": "reviewing", "progress": 70, "message": "AI 质检审核中..."})
 
-        # 阶段2：质检
-        review = review_bid(content, req.parse_result)
+        review = pipe.review_draft()
 
-        # 质检未通过则重生成一轮
-        if not review["passed"]:
+        # 质检未通过则重生成一轮（流式路径会再用终稿复检）
+        if pipe.needs_retry():
             yield _sse_event({"stage": "retry", "progress": 75, "message": "质检未通过，重新生成中..."})
-            review_note = "\n\n[审核意见] " + "；".join(review.get("suggestions", []))
-            retry_prompt = prompt + review_note
-            content_parts = []
-            for delta in generator.generate_stream(retry_prompt, system=SYSTEM_PROMPT):
-                content_parts.append(delta)
+            for delta in pipe.iter_deltas(stream=True):
                 yield _sse_event({"stage": "retry", "progress": 85, "message": "重新生成中...", "delta": delta})
-            content = "".join(content_parts)
-            # 重新质检
-            review = review_bid(content, req.parse_result)
+            content = pipe.content
+            review = pipe.review_draft()
             yield _sse_event({"stage": "reviewing", "progress": 90, "message": "重新审核中..."})
 
         # ── 阶段3.5：格式规范检测 ────────────────────────────────────
@@ -810,19 +942,17 @@ async def generate_bid_stream(req: BidGenerateReq):
             bid_content=content,
             exclude_doc_ids=req.materials or [],
         )
-        
+
         # 阶段5：生成 Word
         yield _sse_event({"stage": "word", "progress": 95, "message": "正在生成 Word 文件..."})
-        doc = _docx_from_markdown(content, req.parse_result.get("project_name", "投标标书"))
-        output_path = GENERATED_DIR / f"bid_{uuid.uuid4().hex[:8]}.docx"
-        doc.save(str(output_path))
+        output_path = _write_bid_docx(content, req.parse_result.get("project_name", "投标标书"))
 
-        # 自动保存版本历史
+        # 自动保存版本历史。strategy 写入请求里的策略，避免历史版本该字段一直为空。
         version_id = _save_bid_version(
             project_name=req.parse_result.get("project_name", ""),
             parse_result=req.parse_result,
             bid_content=content,
-            strategy="",
+            strategy=req.strategy or "",
             file_path=str(output_path),
             material_ids=req.materials or [],
         )
@@ -881,6 +1011,235 @@ def download_bid(filename: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(str(path), filename=filename, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+_PREVIEW_QUERY_LIMIT = 420
+_PREVIEW_TEXT_LIMIT = 500
+_PREVIEW_DEFAULT_K = 8
+_PREVIEW_MAX_K = 20
+_PARSE_CONTEXT_KEYS = (
+    "project_name",
+    "deadline",
+    "requirements",
+    "qualification",
+    "scoring",
+    "technical_requirements",
+    "tech_requirements",
+    "technical_specs",
+)
+
+
+class RecommendPreviewReq(BaseModel):
+    """当前招标解析结果，用来给某一份历史素材排序。"""
+    q: Optional[str] = None
+    parse_result: Optional[dict] = None
+    chapter: Optional[dict] = None
+    top_k: int = _PREVIEW_DEFAULT_K
+
+
+def _nonempty(value: object) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_nonempty(item) for item in value)
+    if isinstance(value, dict):
+        return any(_nonempty(item) for item in value.values())
+    return value is not None and value is not False
+
+
+def _has_recommend_context(parse_result: Optional[dict], chapter: Optional[dict]) -> bool:
+    if isinstance(chapter, dict) and any(
+        _nonempty(chapter.get(key)) for key in ("name", "description", "key_points")
+    ):
+        return True
+    if not isinstance(parse_result, dict):
+        return False
+    return any(_nonempty(parse_result.get(key)) for key in _PARSE_CONTEXT_KEYS)
+
+
+def build_recommend_query(
+    q: Optional[str] = None,
+    parse_result: Optional[dict] = None,
+    chapter: Optional[dict] = None,
+) -> str:
+    """把显式检索词和当前招标解析结果合成一条检索查询。"""
+    explicit = " ".join((q or "").split())
+    contextual = ""
+    if _has_recommend_context(parse_result, chapter):
+        contextual = build_section_retrieval_query(parse_result or {}, chapter)
+    if explicit and contextual:
+        query = contextual if explicit in contextual else f"{explicit} {contextual}"
+    else:
+        query = explicit or contextual
+    query = " ".join(query.split())
+    if len(query) > _PREVIEW_QUERY_LIMIT:
+        query = query[:_PREVIEW_QUERY_LIMIT].rstrip()
+    return query
+
+
+def _coerce_top_k(top_k: int) -> int:
+    try:
+        k = int(top_k)
+    except (TypeError, ValueError):
+        k = _PREVIEW_DEFAULT_K
+    return max(1, min(_PREVIEW_MAX_K, k))
+
+
+def _preview_chunk_index(hit: dict) -> Optional[int]:
+    meta = hit.get("metadata") or {}
+    raw = meta.get("chunk_index") if isinstance(meta, dict) else None
+    if isinstance(raw, bool):
+        raw = None
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    if isinstance(raw, str) and raw.strip().isdigit():
+        return int(raw.strip())
+    match = re.search(r"_chunk(\d+)$", str(hit.get("id") or ""))
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _load_preview_doc(doc_id: int) -> Optional[dict]:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT filename, id FROM documents WHERE id = ?", (doc_id,))
+        doc = cur.fetchone()
+        if not doc:
+            return None
+        cur.execute(
+            "SELECT chunk_index, metadata FROM chunks WHERE doc_id = ?",
+            (doc_id,),
+        )
+        catalog = {}
+        for row in cur.fetchall():
+            meta: dict = {}
+            try:
+                parsed = json.loads(row["metadata"] or "{}")
+                if isinstance(parsed, dict):
+                    meta = parsed
+            except (TypeError, ValueError, json.JSONDecodeError):
+                meta = {}
+            catalog[row["chunk_index"]] = meta
+        return {"filename": doc["filename"], "catalog": catalog}
+    finally:
+        conn.close()
+
+
+def _section_score(hit: dict) -> Optional[float]:
+    raw = hit.get("score")
+    try:
+        if raw is None:
+            return None
+        return round(float(raw), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _rank_score(hit: dict) -> float:
+    score = _section_score(hit)
+    if score is None:
+        return float("-inf")
+    return score
+
+
+def recommend_sections(
+    doc_id: int,
+    q: Optional[str] = None,
+    parse_result: Optional[dict] = None,
+    chapter: Optional[dict] = None,
+    top_k: int = _PREVIEW_DEFAULT_K,
+) -> dict:
+    """在指定素材内，按与当前招标内容的相似度返回章节。"""
+    doc = _load_preview_doc(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    query = build_recommend_query(q, parse_result, chapter)
+    if not query:
+        raise HTTPException(
+            status_code=400,
+            detail="请提供当前招标文件的解析结果或检索词，以便按相似度推荐章节",
+        )
+
+    k = _coerce_top_k(top_k)
+    hits = retrieve(query, top_k=k, doc_ids=[doc_id]) or []
+    hits.sort(key=_rank_score, reverse=True)
+
+    sections = []
+    for rank, hit in enumerate(hits):
+        meta = hit.get("metadata") or {}
+        if not isinstance(meta, dict):
+            meta = {}
+        index = _preview_chunk_index(hit)
+        stored = doc["catalog"].get(index, {}) if index is not None else {}
+        sections.append({
+            "index": index if index is not None else rank,
+            "rank": rank,
+            "text": (hit.get("text") or "")[:_PREVIEW_TEXT_LIMIT],
+            "section_name": meta.get("section_name") or stored.get("section_name") or "",
+            "section_type": meta.get("section_type") or stored.get("section_type") or "",
+            "score": _section_score(hit),
+        })
+
+    payload = {
+        "id": doc_id,
+        "filename": doc["filename"],
+        "section_count": len(sections),
+        "ranked": True,
+        "query": query[:200],
+        "sections": sections,
+    }
+    if not sections:
+        payload["message"] = "未找到与当前招标文件相似的章节"
+    return payload
+
+
+@router.get("/recommend/{doc_id}/preview")
+def recommend_preview(
+    doc_id: int,
+    q: Optional[str] = None,
+    project_name: Optional[str] = None,
+    deadline: Optional[str] = None,
+    requirements: Optional[List[str]] = Query(default=None),
+    qualification: Optional[List[str]] = Query(default=None),
+    chapter_name: Optional[str] = None,
+    chapter_description: Optional[str] = None,
+    top_k: int = Query(default=_PREVIEW_DEFAULT_K, ge=1, le=_PREVIEW_MAX_K),
+):
+    """按当前招标内容，返回该素材中最相似的章节。"""
+    parse_result = {
+        "project_name": project_name or "",
+        "deadline": deadline or "",
+        "requirements": requirements or [],
+        "qualification": qualification or [],
+    }
+    chapter = None
+    if chapter_name or chapter_description:
+        chapter = {
+            "name": chapter_name or "",
+            "description": chapter_description or "",
+        }
+    return recommend_sections(
+        doc_id,
+        q=q,
+        parse_result=parse_result,
+        chapter=chapter,
+        top_k=top_k,
+    )
+
+
+@router.post("/recommend/{doc_id}/preview")
+def recommend_preview_post(doc_id: int, req: RecommendPreviewReq):
+    """同预览接口，请求体携带完整的招标解析结果。"""
+    return recommend_sections(
+        doc_id,
+        q=req.q,
+        parse_result=req.parse_result,
+        chapter=req.chapter,
+        top_k=req.top_k,
+    )
 
 
 @router.post("/analyze-old/{doc_id}")
@@ -1114,6 +1473,205 @@ def restore_bid_version(version_id: int):
         "project_name": version.get("project_name", ""),
         "version_id": version_id,
     }
+
+
+# ── 标书模板库 CRUD ──────────────────────────────────────────────────────────
+
+
+@router.get("/templates")
+def list_templates(category: Optional[str] = None):
+    """获取标书模板列表，可按分类筛选"""
+    conn = get_db()
+    cur = conn.cursor()
+    if category:
+        cur.execute(
+            """SELECT id, name, category, industry, description, chapters, default_strategy,
+                      is_builtin, created_at, updated_at
+               FROM bid_templates WHERE category = ?
+               ORDER BY is_builtin DESC, id ASC""",
+            (category,)
+        )
+    else:
+        cur.execute(
+            """SELECT id, name, category, industry, description, chapters, default_strategy,
+                      is_builtin, created_at, updated_at
+               FROM bid_templates
+               ORDER BY is_builtin DESC, id ASC"""
+        )
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["chapters"] = json.loads(d["chapters"])
+        except (json.JSONDecodeError, TypeError):
+            d["chapters"] = []
+        result.append(d)
+    return {"templates": result}
+
+
+@router.get("/templates/{template_id}")
+def get_template(template_id: int):
+    """获取单个模板详情"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, name, category, industry, description, chapters, default_strategy,
+                  is_builtin, created_at, updated_at
+           FROM bid_templates WHERE id = ?""",
+        (template_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    d = dict(row)
+    try:
+        d["chapters"] = json.loads(d["chapters"])
+    except (json.JSONDecodeError, TypeError):
+        d["chapters"] = []
+    return d
+
+
+@router.post("/templates")
+def create_template(req: BidTemplateCreateReq):
+    """创建自定义模板"""
+    conn = get_db()
+    cur = conn.cursor()
+    chapters_json = json.dumps([ch.model_dump() if hasattr(ch, 'model_dump') else ch for ch in req.chapters], ensure_ascii=False)
+    cur.execute(
+        """INSERT INTO bid_templates (name, category, industry, description, chapters, default_strategy, is_builtin)
+           VALUES (?, ?, ?, ?, ?, ?, 0)""",
+        (req.name, req.category, req.industry, req.description, chapters_json, req.default_strategy)
+    )
+    conn.commit()
+    template_id = cur.lastrowid
+    conn.close()
+    return {"id": template_id, "message": "模板创建成功"}
+
+
+@router.put("/templates/{template_id}")
+def update_template(template_id: int, req: BidTemplateUpdateReq):
+    """更新自定义模板"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM bid_templates WHERE id = ? AND is_builtin = 0", (template_id,))
+    if not cur.fetchone():
+        raise HTTPException(status_code=403, detail="内置模板不可修改")
+
+    fields = []
+    values = []
+    if req.name is not None:
+        fields.append("name = ?")
+        values.append(req.name)
+    if req.category is not None:
+        fields.append("category = ?")
+        values.append(req.category)
+    if req.industry is not None:
+        fields.append("industry = ?")
+        values.append(req.industry)
+    if req.description is not None:
+        fields.append("description = ?")
+        values.append(req.description)
+    if req.chapters is not None:
+        chapters_json = json.dumps([ch.model_dump() if hasattr(ch, 'model_dump') else ch for ch in req.chapters], ensure_ascii=False)
+        fields.append("chapters = ?")
+        values.append(chapters_json)
+    if req.default_strategy is not None:
+        fields.append("default_strategy = ?")
+        values.append(req.default_strategy)
+
+    if not fields:
+        return {"message": "无变更"}
+
+    fields.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(template_id)
+    cur.execute(
+        f"UPDATE bid_templates SET {', '.join(fields)} WHERE id = ?",
+        values
+    )
+    conn.commit()
+    conn.close()
+    return {"message": "模板更新成功"}
+
+
+@router.delete("/templates/{template_id}")
+def delete_template(template_id: int):
+    """删除自定义模板"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM bid_templates WHERE id = ? AND is_builtin = 0", (template_id,))
+    if not cur.fetchone():
+        raise HTTPException(status_code=403, detail="内置模板不可删除")
+    cur.execute("DELETE FROM bid_templates WHERE id = ?", (template_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "模板已删除"}
+
+
+def _init_builtin_templates():
+    """初始化内置模板（仅在首次启动时写入）"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM bid_templates WHERE is_builtin = 1")
+    count = cur.fetchone()[0]
+    if count > 0:
+        conn.close()
+        return
+
+    templates = [
+        {
+            "name": "设备采购技术标",
+            "category": "设备采购技术标",
+            "industry": "石油石化/钢管管件",
+            "description": "适用于钢管管件等物资采购项目的技术投标文件，覆盖资质、技术方案、质量标准和售后服务等核心章节",
+            "default_strategy": "技术优先型",
+            "chapters": [
+                {"name": "投标函", "description": "投标总报价、交货期承诺、质量承诺、投标有效期等", "key_points": "报价有效期通常为90天，交货期承诺需满足招标要求"},
+                {"name": "法定代表人身份证明及授权委托书", "description": "法定代表人身份证明、授权委托书及被授权人身份证明", "key_points": "需加盖公章，授权委托书需明确授权范围"},
+                {"name": "投标人资格审查资料", "description": "营业执照、特种设备制造许可证（压力管道元件）、API认证、ISO体系证书等", "key_points": "证书需在有效期内，覆盖招标范围"},
+                {"name": "企业概况与业绩", "description": "公司简介、生产能力、近三年石油石化行业供货业绩（含合同复印件）", "key_points": "业绩合同需提供关键页，金额和型号清晰可见"},
+                {"name": "技术方案", "description": "生产工艺流程、关键工序质量控制、技术路线说明", "key_points": "突出钢管管件生产工艺优势，从原材料到成品全过程描述"},
+                {"name": "产品技术参数响应", "description": "按招标文件技术要求逐条响应，涵盖材质、壁厚、公差、防腐层等", "key_points": "逐条对应招标技术规格书，标注符合/优于/偏离"},
+                {"name": "质量标准与检测", "description": "执行标准、出厂检验项目、第三方检测报告、质量保证期", "key_points": "列出执行的国标/行标/企标清单"},
+                {"name": "生产进度与交货计划", "description": "生产排产计划表、产能保障措施", "key_points": "需有具体时间节点和产能数据支撑"},
+                {"name": "包装运输方案", "description": "包装标准、管端保护方式、运输方案、货物追踪", "key_points": "钢管管件包装需符合石油行业运输要求"},
+                {"name": "售后服务承诺", "description": "质保期服务、现场技术支持、响应时间", "key_points": "中石油项目通常要求24小时响应"},
+                {"name": "近年财务状况", "description": "近三年资产负债表、利润表、银行资信证明", "key_points": "财务状况需良好，资产负债率通常要求低于70%"},
+                {"name": "其他证明材料", "description": "信用中国报告、纳税证明、社保记录、无行贿记录证明", "key_points": "信用报告需为近一个月内查询结果"}
+            ]
+        },
+        {
+            "name": "设备采购商务标",
+            "category": "设备采购商务标",
+            "industry": "石油石化/钢管管件",
+            "description": "适用于钢管管件等物资采购项目的商务投标文件，重点覆盖报价明细和商务条款响应",
+            "default_strategy": "成本控制型",
+            "chapters": [
+                {"name": "投标函", "description": "投标总价、分项报价汇总、增值税率、投标有效期", "key_points": "大小写金额必须一致，税率按最新政策填写"},
+                {"name": "法定代表人授权委托书", "description": "授权委托书、被授权人身份证明", "key_points": "需附被授权人身份证复印件并加盖公章"},
+                {"name": "分项报价表", "description": "按规格逐项报价，含规格、材质、数量、单价、总价、防腐加工费", "key_points": "逐项填写，合计总价与投标函一致"},
+                {"name": "价格构成分析", "description": "原材料成本、加工费、管理费、利润、运费的明细构成", "key_points": "分析合理，避免畸高畸低引起评委质疑"},
+                {"name": "商务条款响应", "description": "对付款方式、履约保证金、质保金、发票类型等逐条响应", "key_points": "偏离项需在偏离表中说明"},
+                {"name": "投标保证金", "description": "保证金缴纳凭证（银行保函或电汇回单）", "key_points": "金额和有效期需满足招标文件要求"},
+                {"name": "制造商授权书", "description": "代理商投标时需提供制造商针对本项目的唯一授权", "key_points": "仅代理商投标时需要"},
+                {"name": "近年审计报告", "description": "经审计的财务报告关键页", "key_points": "需加盖审计机构印章"},
+                {"name": "偏离表", "description": "技术/商务偏离说明", "key_points": "无偏离请填写'无偏离'"}
+            ]
+        }
+    ]
+
+    for t in templates:
+        chapters_json = json.dumps(t["chapters"], ensure_ascii=False)
+        cur.execute(
+            """INSERT INTO bid_templates (name, category, industry, description, chapters, default_strategy, is_builtin)
+               VALUES (?, ?, ?, ?, ?, ?, 1)""",
+            (t["name"], t["category"], t["industry"], t["description"], chapters_json, t["default_strategy"])
+        )
+    conn.commit()
+    conn.close()
+    print(f"[Templates] 已初始化 {len(templates)} 套内置模板")
 
 
 def _save_bid_version(

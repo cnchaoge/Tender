@@ -63,6 +63,16 @@ class MockGenerator(BaseGenerator):
 | 税费 | 5万元 |
 | **合计** | **50万元** |"""
 
+    def generate_stream(self, prompt: str, system: str = "", **kwargs):
+        """按行吐出 generate() 的同一段文本，供无密钥时走 SSE 生成。"""
+        text = self.generate(prompt, system=system, **kwargs)
+        lines = text.splitlines(keepends=True)
+        if not lines and text:
+            yield text
+            return
+        for line in lines:
+            yield line
+
 
 class DeepSeekGenerator(BaseGenerator):
     """DeepSeek API（OpenAI 兼容格式）"""
@@ -168,6 +178,46 @@ class MiniMaxGenerator(BaseGenerator):
         return resp.choices[0].message.content
 
 
+class OllamaGenerator(BaseGenerator):
+    """Ollama 本地 LLM（OpenAI 兼容 API，无需 API Key）"""
+    def __init__(self):
+        super().__init__(settings.OLLAMA_MODEL)
+        from openai import OpenAI
+        self.client = OpenAI(
+            api_key="ollama",  # Ollama 不校验 API Key，但 OpenAI SDK 要求非空
+            base_url=f"{settings.OLLAMA_BASE_URL}/v1",
+        )
+
+    def generate(self, prompt: str, system: str = "", **kwargs) -> str:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            stream=False,
+            **kwargs
+        )
+        return resp.choices[0].message.content
+
+    def generate_stream(self, prompt: str, system: str = "", **kwargs):
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            stream=True,
+            **kwargs
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+
+
 def get_generator():
     """根据配置返回 LLM 实例"""
     provider = settings.LLM_PROVIDER
@@ -182,4 +232,6 @@ def get_generator():
         return OpenAIGenerator()
     elif provider == "minimax":
         return MiniMaxGenerator()
+    elif provider == "ollama":
+        return OllamaGenerator()
     raise ValueError(f"未知的 LLM provider: {provider}")

@@ -1,11 +1,25 @@
 """
 Tender - SQLite 数据库初始化
 """
+import secrets
 import sqlite3
 from pathlib import Path
-from server.config import DATA_DIR
+
+from passlib.context import CryptContext
+
+from server.config import DATA_DIR, write_private_text
 
 DB_PATH = DATA_DIR / "tender.db"
+
+BOOTSTRAP_ADMIN_USERNAME = "admin"
+BOOTSTRAP_DONE_KEY = "bootstrap_admin_done"
+LEGACY_PASSWORD_CHECKED_KEY = "legacy_default_password_checked"
+INITIAL_PASSWORD_FILENAME = "initial_admin_password.txt"
+# Detected only so an existing install still using the old seeded password
+# must change it. New installs never store this password.
+LEGACY_ADMIN_PASSWORD = "admin123"
+
+_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def get_db():
@@ -26,6 +40,7 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
+            must_change_password INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -90,21 +105,197 @@ def init_db():
         )
     """)
 
-    # 默认管理员账号 admin / admin123
-    from passlib.context import CryptContext
-    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    password_hash = pwd_ctx.hash("admin123")
-    try:
-        cur.execute(
-            "INSERT OR IGNORE INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-            ("admin", password_hash, "admin")
+    # 报价分析记录
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS price_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL DEFAULT '',
+            formula_json TEXT NOT NULL DEFAULT '{}',
+            cost_price REAL NOT NULL DEFAULT 0,
+            suggested_price REAL,
+            calculated_results TEXT NOT NULL DEFAULT '{}',
+            strategy_scores TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         )
-    except Exception:
-        pass
+    """)
+
+    # 投标材料检查清单
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS checklist_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bid_version_id INTEGER NOT NULL DEFAULT 0,
+            category TEXT NOT NULL DEFAULT '其他',
+            item TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '待准备',
+            remark TEXT DEFAULT '',
+            source TEXT DEFAULT 'auto',
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+    """)
+
+    # 标书模板库
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bid_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            industry TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            chapters TEXT NOT NULL,
+            default_strategy TEXT DEFAULT '综合均衡型',
+            is_builtin INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    _ensure_user_columns(cur)
+    initial_password_log = bootstrap_admin(conn, DATA_DIR)
 
     conn.commit()
     conn.close()
     print(f"[DB] SQLite initialized: {DB_PATH}")
+    if initial_password_log:
+        print(initial_password_log)
+
+
+def _config_get(cur: sqlite3.Cursor, key: str) -> str | None:
+    cur.execute("SELECT value FROM configs WHERE key = ?", (key,))
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return row["value"]
+
+
+def _config_set(cur: sqlite3.Cursor, key: str, value: str) -> None:
+    cur.execute(
+        "INSERT INTO configs (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
+def _ensure_user_columns(cur: sqlite3.Cursor) -> None:
+    cur.execute("PRAGMA table_info(users)")
+    columns = {row[1] for row in cur.fetchall()}
+    if "must_change_password" not in columns:
+        cur.execute(
+            "ALTER TABLE users ADD COLUMN must_change_password "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def _parse_initial_password(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for line in text.splitlines():
+        if line.startswith("password="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+def _write_initial_password_file(path: Path, username: str, password: str) -> None:
+    content = (
+        f"username={username}\n"
+        f"password={password}\n"
+        "This one-time password was generated for the first install.\n"
+        "Sign in and change it immediately, then delete this file.\n"
+    )
+    write_private_text(path, content)
+
+
+def _flag_legacy_default_password(cur: sqlite3.Cursor) -> bool:
+    """Require a password change if admin still uses the old public password.
+
+    Returns True only when this call newly sets that requirement.
+    """
+    if _config_get(cur, LEGACY_PASSWORD_CHECKED_KEY) == "1":
+        return False
+    cur.execute(
+        "SELECT id, password_hash, must_change_password FROM users WHERE username = ?",
+        (BOOTSTRAP_ADMIN_USERNAME,),
+    )
+    row = cur.fetchone()
+    if row is None or row["must_change_password"]:
+        _config_set(cur, LEGACY_PASSWORD_CHECKED_KEY, "1")
+        return False
+    try:
+        is_legacy = _pwd_ctx.verify(LEGACY_ADMIN_PASSWORD, row["password_hash"])
+    except Exception:
+        is_legacy = False
+    if is_legacy:
+        cur.execute(
+            "UPDATE users SET must_change_password = 1 WHERE id = ?",
+            (row["id"],),
+        )
+    _config_set(cur, LEGACY_PASSWORD_CHECKED_KEY, "1")
+    return bool(is_legacy)
+
+
+def bootstrap_admin(conn: sqlite3.Connection, data_dir: Path) -> str | None:
+    """Create the first admin once, or flag the old public admin password.
+
+    The returned string is a one-time log line containing a newly generated
+    password. The caller must commit before printing it. Later startups, and
+    a deleted admin user, do not create another account.
+    """
+    cur = conn.cursor()
+    done = _config_get(cur, BOOTSTRAP_DONE_KEY)
+    cur.execute("SELECT COUNT(*) AS n FROM users")
+    user_count = int(cur.fetchone()["n"])
+
+    if done == "1":
+        _flag_legacy_default_password(cur)
+        return None
+
+    if user_count > 0:
+        flagged = _flag_legacy_default_password(cur)
+        _config_set(cur, BOOTSTRAP_DONE_KEY, "1")
+        if flagged:
+            print(
+                "[auth] The admin account still uses the old public password. "
+                "The next login must change it. The password was not reset."
+            )
+        else:
+            print(
+                "[auth] Existing users found. Skipped bootstrap admin creation. "
+                "Deleting a user will not recreate admin."
+            )
+        return None
+
+    path = data_dir / INITIAL_PASSWORD_FILENAME
+    password = _parse_initial_password(path)
+    generated = False
+    if not password or password == LEGACY_ADMIN_PASSWORD:
+        password = secrets.token_urlsafe(18)
+        _write_initial_password_file(path, BOOTSTRAP_ADMIN_USERNAME, password)
+        generated = True
+    password_hash = _pwd_ctx.hash(password)
+    cur.execute(
+        "INSERT INTO users (username, password_hash, role, must_change_password) "
+        "VALUES (?, ?, ?, 1)",
+        (BOOTSTRAP_ADMIN_USERNAME, password_hash, "admin"),
+    )
+    _config_set(cur, BOOTSTRAP_DONE_KEY, "1")
+    _config_set(cur, LEGACY_PASSWORD_CHECKED_KEY, "1")
+    if not generated:
+        print(
+            "[auth] Created bootstrap admin from the existing one-time password "
+            f"file {path}."
+        )
+        return None
+    return (
+        "[auth] Created bootstrap admin 'admin'. "
+        f"One-time password file: {path}\n"
+        f"[auth] Initial admin password (shown once): {password}\n"
+        "[auth] Change this password at first login. "
+        "It will not be printed again."
+    )
 
 
 if __name__ == "__main__":

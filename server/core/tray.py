@@ -212,8 +212,11 @@ def _on_exit(icon, item):
 
 def _run_tray():
     global _tray
-    import pystray
-    from pystray import MenuItem as MI
+    try:
+        import pystray
+        from pystray import MenuItem as MI
+    except ImportError:
+        return  # pystray not installed
 
     img = _create_icon_image()
     menu = pystray.Menu(

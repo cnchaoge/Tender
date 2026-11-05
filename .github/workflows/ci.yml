@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: |
+          pip install ruff
+          ruff check .
+      - name: Type check (mypy)
+        run: |
+          pip install mypy
+          python -m mypy server --ignore-missing-imports
+      - name: Run tests
+        run: pytest -q --cov=server --cov-report=xml
+      - name: Check coverage threshold
+        run: |
+          python - <<PY
+import xml.etree.ElementTree as ET
+root=ET.parse('coverage.xml').getroot()
+line_rate=root.attrib.get('line-rate') or root.attrib.get('lines-covered')
+# coverage.py uses 'line-rate' on root
+if line_rate is None:
+    print('coverage.xml missing line-rate. failing.'); raise SystemExit(2)
+pct=float(line_rate)*100
+print(f'Coverage: {pct:.2f}%')
+min_pct=30.0
+if pct < min_pct:
+    print(f'Coverage {pct:.2f}% below threshold {min_pct}%'); raise SystemExit(3)
+PY
+      - name: Upload coverage (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
