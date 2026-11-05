@@ -658,21 +658,23 @@
     />
 
     <!-- 素材章节预览 -->
-    <el-dialog v-model="previewDialogVisible" title="素材章节预览" width="600px">
+    <el-dialog v-model="previewDialogVisible" title="相似章节" width="600px">
       <div v-if="previewLoading" style="text-align:center;padding:40px">
         <el-icon class="is-loading" size="20"><Loading /></el-icon>
       </div>
       <template v-else>
         <div class="preview-header" v-if="previewData">
           <span class="preview-filename">{{ previewData.filename }}</span>
-          <span class="preview-count">共 {{ previewData.section_count }} 个章节/片段</span>
+          <span class="preview-count" v-if="previewData.ranked">按相关度排序 · {{ previewData.section_count }} 个相似片段</span>
+          <span class="preview-count" v-else>共 {{ previewData.section_count }} 个章节/片段</span>
         </div>
         <div v-if="previewData?.sections?.length" class="preview-sections">
-          <div v-for="sec in previewData.sections" :key="sec.index" class="preview-section">
+          <div v-for="sec in previewData.sections" :key="sec.rank ?? sec.index" class="preview-section">
             <div class="preview-section-header">
-              <span class="preview-section-num">#{{ sec.index + 1 }}</span>
+              <span class="preview-section-num">相似 #{{ (sec.rank ?? sec.index) + 1 }}</span>
               <span v-if="sec.section_name" class="preview-section-name">{{ sec.section_name }}</span>
               <span v-if="sec.section_type" class="preview-section-type">{{ sec.section_type }}</span>
+              <span v-if="relevanceLabel(sec.score)" class="preview-section-type">{{ relevanceLabel(sec.score) }}</span>
             </div>
             <div class="preview-section-text">{{ sec.text }}</div>
             <div class="preview-section-actions">
@@ -682,7 +684,7 @@
             </div>
           </div>
         </div>
-        <el-empty v-else-if="!previewLoading" :image-size="60" description="暂无章节数据（文件可能未进行标书拆解分析）" />
+        <el-empty v-else-if="!previewLoading" :image-size="60" :description="previewData?.message || '未找到与当前招标文件相似的章节'" />
       </template>
     </el-dialog>
   </div>
@@ -693,7 +695,7 @@ import { ref, computed, nextTick, onMounted } from "vue"
 import { ElMessage } from "element-plus"
 import { Upload, Document, Files, Check, Download, ArrowRight, Plus, Loading } from "@element-plus/icons-vue"
 import { useKbStore } from "../stores/kb"
-import api, { authFetch, downloadWithAuth } from "../api"
+import api, { authFetch, bid, downloadWithAuth } from "../api"
 import { marked } from "marked"
 import BidChecklistDialog from "../components/BidChecklistDialog.vue"
 import { checklist as checklistApi } from "../api"
@@ -859,6 +861,27 @@ function scoreClass(score) {
   return 'score-low'
 }
 
+function relevanceLabel(score) {
+  const n = Number(score)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return `相关度 ${Math.round(Math.min(1, n) * 100)}%`
+}
+
+function previewContext() {
+  const parsed = parseResult.value
+  if (!parsed) return {}
+  return {
+    parse_result: {
+      project_name: parsed.project_name || "",
+      deadline: parsed.deadline || "",
+      requirements: parsed.requirements || [],
+      qualification: parsed.qualification || [],
+      scoring: parsed.scoring || {},
+      technical_requirements: parsed.technical_requirements || parsed.tech_requirements || [],
+    },
+  }
+}
+
 // 匹配度颜色（用于 match_score 显示）
 function matchScoreClass(level) {
   if (level === 'high') return 'match-high'
@@ -884,14 +907,22 @@ function copySection(sec) {
 
 // 素材章节预览
 async function openPreview(mat) {
-  if (!mat.matched_excerpts && !mat.relevance_score) return  // 非推荐素材不预览
+  if (mat.relevance_score == null && !mat.matched_excerpts) return
   previewLoading.value = true
   previewDialogVisible.value = true
+  previewData.value = null
   try {
-    const resp = await bid.recommendPreview(mat.id)
+    const resp = await bid.recommendPreview(mat.id, previewContext())
     previewData.value = resp.data
   } catch (e) {
-    previewData.value = { filename: mat.filename, sections: [], section_count: 0 }
+    const detail = e?.response?.data?.detail
+    previewData.value = {
+      filename: mat.filename,
+      sections: [],
+      section_count: 0,
+      ranked: false,
+      message: typeof detail === "string" ? detail : "相似章节加载失败",
+    }
   } finally {
     previewLoading.value = false
   }

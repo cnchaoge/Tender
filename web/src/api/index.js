@@ -143,7 +143,8 @@ const bid = {
   ),
   matchCheck: (parseResult, materials) =>
     http.post("/api/bid/match_check", { parse_result: parseResult, materials }),
-  recommendPreview: (docId) => http.get(`/api/bid/recommend/${docId}/preview`),
+  recommendPreview: (docId, payload) =>
+    http.post(`/api/bid/recommend/${docId}/preview`, payload || {}),
   analyzeOld: (docId) => http.post(`/api/bid/analyze-old/${docId}`),
   analyzeOldSections: (docId) => http.get(`/api/bid/analyze-old/${docId}/sections`),
   violationCheck: (payload) => http.post("/api/bid/violation_check", payload),
