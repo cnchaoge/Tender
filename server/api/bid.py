@@ -351,7 +351,13 @@ from server.db.sqlite import get_db
 from server.core.retriever.retriever import retrieve
 from server.core.retriever.section_query import build_section_retrieval_query, collect_section_materials
 from server.core.generator.llm import get_generator
-from server.core.reviewer import review_bid, _check_format_compliance
+from server.core.bidgen.pipeline import (
+    BidDraftPipeline,
+    chapter_lookup,
+    format_scoring as _format_scoring,
+    match_heading_chapter,
+)
+from server.core.reviewer import _check_format_compliance
 from server.tools.violation_checker import get_violation_checker
 from server.tools.plagiarism_checker import get_plagiarism_checker
 from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchCheckReq, BidPlanReq, BidPlanResp, BidTemplateCreateReq, BidTemplateUpdateReq, Resp
@@ -359,9 +365,7 @@ from server.models import BidParseReq, BidParseResp, BidGenerateReq, BidMatchChe
 router = APIRouter(prefix="/api/bid", tags=["标书生成"], dependencies=[Depends(get_current_user)])
 settings = get_settings()
 
-SYSTEM_PROMPT = """你是一个专业的招投标文档专家，擅长分析招标文件并生成投标标书。"""
 
- 
 def _json_clean(raw: str) -> str:
     """去掉 markdown json 包装（```json ... ```）"""
     raw = raw.strip()
@@ -653,39 +657,6 @@ def parse_bid_file(req: BidParseReq):
         )
 
 
-def _format_scoring(scoring: dict) -> str:
-    """把 scoring dict 格式化为 prompt 友好文本"""
-    if not scoring:
-        return "未提供评分标准"
-    method = scoring.get("method", "未知")
-    sections = scoring.get("sections", [])
-    disqualify = scoring.get("disqualify_conditions", [])
-
-    lines = [f"评标办法：{method}"]
-    for section in sections:
-        lines.append(f"  {section.get('name', '评分项')}（权重{section.get('weight', 0)}%）：")
-        for item in section.get("items", []):
-            item_name = item.get("name", "")
-            score = item.get("score", 0)
-            max_score = item.get("max_score", 0)
-            item_type = item.get("type", "expert")
-            formula = item.get("formula", "")
-            disqualify_if_fail = item.get("disqualify_if_fail", False)
-            item_req = "；".join(item.get("requirements", []))
-
-            type_desc = {"expert": "专家打分", "formula": "公式计算", "qualified": "满足即得分"}.get(item_type, item_type)
-            disqualify_str = "（不满足则废标）" if disqualify_if_fail else ""
-            formula_str = f"，公式：{formula}" if formula else ""
-            req_str = f"，{item_req}" if item_req else ""
-
-            lines.append(f"    - {item_name}：{score}/{max_score}分，{type_desc}{formula_str}{disqualify_str}{req_str}")
-
-    if disqualify:
-        lines.append(f"  废标条件：{'；'.join(disqualify)}")
-
-    return "\n".join(lines)
-
-
 def _load_material_docs(doc_ids: list) -> list[dict]:
     """按素材 ID 读取文件名。缺失的文档直接跳过。"""
     if not doc_ids:
@@ -812,70 +783,33 @@ def plan_bid(req: BidPlanReq):
         return BidPlanResp(chapters=chapters_with_status)
 
 
+def _write_bid_docx(content: str, title: str) -> Path:
+    """两条生成接口共用的 Word 落盘。"""
+    doc = _docx_from_markdown(content, title)
+    output_path = GENERATED_DIR / f"bid_{uuid.uuid4().hex[:8]}.docx"
+    doc.save(str(output_path))
+    return output_path
+
+
 @router.post("/generate", response_model=dict)
 def generate_bid(req: BidGenerateReq):
-    """根据招标文件生成标书（带 AI 质检，非流式）"""
+    """根据招标文件生成标书（带 AI 质检，非流式）。正文生成走 BidDraftPipeline。"""
     generator = get_generator()
 
     # 按章节检索素材：查询包含章节标题/用途，以及与该章相关的技术要求和评分项。
     materials_text = _retrieve_materials_text(
         req.parse_result, req.materials, req.chapters
     )
+    pipe = BidDraftPipeline(generator, req.parse_result, materials_text, req.strategy)
+    for _delta in pipe.iter_deltas(stream=False):
+        pass
+    review = pipe.review_draft()
+    # 与原非流式接口一致：重写后仍返回首轮质检，不把第二轮结果写进响应。
+    if pipe.needs_retry():
+        for _delta in pipe.iter_deltas(stream=False):
+            pass
 
-    # 检查是否需要 raw_text 降级
-    raw_text = req.parse_result.get("raw_text", "")
-    project_name = req.parse_result.get("project_name", "")
-    confidence = req.parse_result.get("parse_meta", {}).get("confidence", 1.0)
-    use_raw_fallback = (
-        "未识别" in project_name
-        or "解析失败" in project_name
-        or confidence < 0.5
-    )
-
-    bid_info = f"""招标文件：
-- 项目名称：{project_name}
-- 工期：{req.parse_result.get("deadline", "")}
-- 资格要求：{", ".join(req.parse_result.get("requirements", []))}
-- 资质要求：{", ".join(req.parse_result.get("qualification", []))}
-- {_format_scoring(req.parse_result.get("scoring", {}))}"""
-
-    # 降级：confidence 低于阈值时，把 raw_text 直接附在后面让 LLM 再读
-    if use_raw_fallback and raw_text:
-        bid_info += f"\n\n【原文内容】（解析结果不可信，请直接阅读原文提取关键信息）：\n{raw_text[:3000]}"
-
-    prompt = f"""根据以下招标文件要求和素材，生成一份投标标书。
-
-{bid_info}
-
-可用素材（按章节分组，撰写该章节时优先使用对应素材）：
-{materials_text if materials_text else "无"}
-
-请生成完整的投标标书，包含：
-1. 投标函
-2. 资格审查文件
-3. 技术标
-4. 商务标
-
-输出格式：Markdown"""
-
-    # 第一轮生成
-    content = generator.generate(prompt, system=SYSTEM_PROMPT)
-
-    # AI 质检
-    review = review_bid(content, req.parse_result)
-
-    # 质检未通过，根据建议重新生成一轮
-    if not review["passed"]:
-        review_note = "\n\n[审核意见] " + "；".join(review.get("suggestions", []))
-        retry_prompt = prompt + review_note
-        content = generator.generate(retry_prompt, system=SYSTEM_PROMPT)
-
-    # 转为 Word
-    doc = _docx_from_markdown(content, req.parse_result.get("project_name", "投标标书"))
-
-    output_path = GENERATED_DIR / f"bid_{uuid.uuid4().hex[:8]}.docx"
-    doc.save(str(output_path))
-
+    output_path = _write_bid_docx(pipe.content, req.parse_result.get("project_name", "投标标书"))
     return {
         "file_path": str(output_path),
         "filename": output_path.name,
@@ -892,94 +826,26 @@ def _sse_event(data: dict, event: str = "message") -> bytes:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
 
 
-def _get_strategy_guidance(strategy: str) -> str:
-    """根据策略返回对应的投标策略指导文本"""
-    strategies = {
-        "技术优先型": "【投标策略】：技术优先型\n- 侧重技术方案完整性、创新点、工程质量保障措施\n- 技术标内容要详细、专业，突出企业技术优势和施工能力\n- 适当弱化价格因素，以技术方案得分最大化为目标\n- 注重施工工艺、质量控制体系、安全文明施工等章节的深度",
-        "成本控制型": "【投标策略】：成本控制型\n- 侧重成本优化、施工方案经济性、项目利润最大化\n- 在满足招标要求的前提下，尽量压缩成本，提高利润率\n- 报价策略优先，采用有竞争力的价格策略\n- 技术方案以「合格」为标准，不过度展开，简明扼要即可",
-        "综合均衡型": "【投标策略】：综合均衡型\n- 技术和价格平衡，在满足招标要求的前提下追求性价比最优\n- 技术方案完整、专业，但不过度冗余\n- 报价合理有竞争力，既不过高也不恶性低价\n- 标书整体均衡、专业、完整，能满足评标的各方面要求",
-    }
-    return strategies.get(strategy, strategies["综合均衡型"])
-
-
 @router.post("/generate/stream")
 async def generate_bid_stream(req: BidGenerateReq):
-    """SSE 流式生成标书，逐步推送进度"""
+    """SSE 流式生成标书。组 prompt、调用模型和质检重写与非流式接口共用 BidDraftPipeline。"""
     generator = get_generator()
 
     # 与非流式生成共用按章节检索，避免流式路径仍只用项目名和工期。
     materials_text = _retrieve_materials_text(
         req.parse_result, req.materials, req.chapters
     )
-
-    # 检查是否需要 raw_text 降级
-    raw_text = req.parse_result.get("raw_text", "")
-    project_name = req.parse_result.get("project_name", "")
-    confidence = req.parse_result.get("parse_meta", {}).get("confidence", 1.0)
-    use_raw_fallback = (
-        "未识别" in project_name
-        or "解析失败" in project_name
-        or confidence < 0.5
-    )
-
-    bid_info = f"""招标文件：
-- 项目名称：{project_name}
-- 工期：{req.parse_result.get("deadline", "")}
-- 资格要求：{", ".join(req.parse_result.get("requirements", []))}
-- 资质要求：{", ".join(req.parse_result.get("qualification", []))}
-- {_format_scoring(req.parse_result.get("scoring", {}))}"""
-
-    # 降级：confidence 低于阈值时，把 raw_text 直接附在后面让 LLM 再读
-    if use_raw_fallback and raw_text:
-        bid_info += f"\n\n【原文内容】（解析结果不可信，请直接阅读原文提取关键信息）：\n{raw_text[:3000]}"
-
-    prompt = f"""根据以下招标文件要求和素材，生成一份投标标书。
-
-{bid_info}
-
-{_get_strategy_guidance(req.strategy)}
-
-可用素材（按章节分组，撰写该章节时优先使用对应素材）：
-{materials_text if materials_text else "无"}
-
-请生成完整的投标标书，包含：
-1. 投标函
-2. 资格审查文件
-3. 技术标
-4. 商务标
-
-输出格式：Markdown"""
+    pipe = BidDraftPipeline(generator, req.parse_result, materials_text, req.strategy)
 
     async def stream_response():
         chapters = req.chapters or []
-        chapter_status = {ch.get("index", i): {"name": ch.get("name", ""), "status": "pending", "progress": 0} for i, ch in enumerate(chapters)}
-
-        def _emit_chapter_start(idx, name):
-            yield _sse_event({"stage": "chapter_start", "chapter_index": idx, "chapter_name": name})
-
-        def _emit_chapter_done(idx, name):
-            yield _sse_event({"stage": "chapter_done", "chapter_index": idx, "chapter_name": name})
-
-        def _emit_chapter_progress(idx, name, progress):
-            yield _sse_event({"stage": "chapter_progress", "chapter_index": idx, "chapter_name": name, "progress": progress})
-
-        # Chapter name → index map (for matching headings)
-        chapter_name_to_idx = {}
-        for ch in chapters:
-            name = ch.get("name", "")
-            # strip chapter number prefix like "第一章 " → "技术标"
-            for suffix in ["第一章 ", "第二章 ", "第三章 ", "第四章 ", "第五章 ", "第六章 ", "第七章 ", "第八章 ", "第九章 ", "第十章 ", "第1章 ", "第2章 ", "第3章 ", "第4章 ", "第5章 "]:
-                if name.startswith(suffix):
-                    name = name[len(suffix):]
-                    break
-            chapter_name_to_idx[name] = ch.get("index", 0)
-
+        chapter_name_to_idx = chapter_lookup(chapters)
         active_chapter_idx = None
         active_chapter_name = ""
 
         # 阶段0：生成前废标项预检
         yield _sse_event({"stage": "violation_check", "progress": 5, "message": "正在检测废标项风险..."})
-        
+
         # 废标项检查（generate 阶段：检测标书正文是否满足招标文件要求）
         violation_checker = get_violation_checker()
         violation_result = None
@@ -1005,38 +871,39 @@ async def generate_bid_stream(req: BidGenerateReq):
         # 阶段1：生成中
         yield _sse_event({"stage": "generating", "progress": 10, "message": "正在生成标书正文..."})
 
-        content_parts = []
-        for delta in generator.generate_stream(prompt, system=SYSTEM_PROMPT):
-            content_parts.append(delta)
-
+        for delta in pipe.iter_deltas(stream=True):
             # Detect chapter headings from delta (markdown headings like "# 投标函" or "## 第一章 投标函")
-            heading_match = re.match(r"^(#{1,4})\s+(.+?)\n", delta)
-            if heading_match and chapters:
-                heading_text = heading_match.group(2).strip()
-                # Check if this heading matches a known chapter
-                for ch_name, ch_idx in chapter_name_to_idx.items():
-                    if ch_name in heading_text or heading_text in ch_name:
-                        if active_chapter_idx != ch_idx:
-                            # Emit chapter_done for previous chapter
-                            if active_chapter_idx is not None:
-                                for _ in _emit_chapter_done(active_chapter_idx, active_chapter_name):
-                                    yield _
-                            # Emit chapter_start for new chapter
-                            active_chapter_idx = ch_idx
-                            active_chapter_name = ch_name
-                            for _ in _emit_chapter_start(ch_idx, ch_name):
-                                yield _
-                        break
+            if chapters:
+                matched = match_heading_chapter(delta, chapter_name_to_idx)
+                if matched:
+                    ch_idx, ch_name = matched
+                    if active_chapter_idx != ch_idx:
+                        if active_chapter_idx is not None:
+                            yield _sse_event({
+                                "stage": "chapter_done",
+                                "chapter_index": active_chapter_idx,
+                                "chapter_name": active_chapter_name,
+                            })
+                        active_chapter_idx = ch_idx
+                        active_chapter_name = ch_name
+                        yield _sse_event({
+                            "stage": "chapter_start",
+                            "chapter_index": ch_idx,
+                            "chapter_name": ch_name,
+                        })
 
             # 估算进度 10-60%
             yield _sse_event({"stage": "generating", "progress": 30, "message": "生成中...", "delta": delta})
 
-        content = "".join(content_parts)
+        content = pipe.content
 
         # Mark last active chapter as done
         if active_chapter_idx is not None:
-            for _ in _emit_chapter_done(active_chapter_idx, active_chapter_name):
-                yield _
+            yield _sse_event({
+                "stage": "chapter_done",
+                "chapter_index": active_chapter_idx,
+                "chapter_name": active_chapter_name,
+            })
 
         # ── 阶段2：废标项检测（基于生成的标书正文）───────────────────────
         yield _sse_event({"stage": "violation_check", "progress": 65, "message": "废标项合规性检测..."})
@@ -1049,25 +916,19 @@ async def generate_bid_stream(req: BidGenerateReq):
                     "message": "存在废标风险项，请留意",
                     "violation_result": violation_result,
                 })
-        
+
         # 阶段3：质检
         yield _sse_event({"stage": "reviewing", "progress": 70, "message": "AI 质检审核中..."})
 
-        # 阶段2：质检
-        review = review_bid(content, req.parse_result)
+        review = pipe.review_draft()
 
-        # 质检未通过则重生成一轮
-        if not review["passed"]:
+        # 质检未通过则重生成一轮（流式路径会再用终稿复检）
+        if pipe.needs_retry():
             yield _sse_event({"stage": "retry", "progress": 75, "message": "质检未通过，重新生成中..."})
-            review_note = "\n\n[审核意见] " + "；".join(review.get("suggestions", []))
-            retry_prompt = prompt + review_note
-            content_parts = []
-            for delta in generator.generate_stream(retry_prompt, system=SYSTEM_PROMPT):
-                content_parts.append(delta)
+            for delta in pipe.iter_deltas(stream=True):
                 yield _sse_event({"stage": "retry", "progress": 85, "message": "重新生成中...", "delta": delta})
-            content = "".join(content_parts)
-            # 重新质检
-            review = review_bid(content, req.parse_result)
+            content = pipe.content
+            review = pipe.review_draft()
             yield _sse_event({"stage": "reviewing", "progress": 90, "message": "重新审核中..."})
 
         # ── 阶段3.5：格式规范检测 ────────────────────────────────────
@@ -1081,19 +942,17 @@ async def generate_bid_stream(req: BidGenerateReq):
             bid_content=content,
             exclude_doc_ids=req.materials or [],
         )
-        
+
         # 阶段5：生成 Word
         yield _sse_event({"stage": "word", "progress": 95, "message": "正在生成 Word 文件..."})
-        doc = _docx_from_markdown(content, req.parse_result.get("project_name", "投标标书"))
-        output_path = GENERATED_DIR / f"bid_{uuid.uuid4().hex[:8]}.docx"
-        doc.save(str(output_path))
+        output_path = _write_bid_docx(content, req.parse_result.get("project_name", "投标标书"))
 
-        # 自动保存版本历史
+        # 自动保存版本历史。strategy 写入请求里的策略，避免历史版本该字段一直为空。
         version_id = _save_bid_version(
             project_name=req.parse_result.get("project_name", ""),
             parse_result=req.parse_result,
             bid_content=content,
-            strategy="",
+            strategy=req.strategy or "",
             file_path=str(output_path),
             material_ids=req.materials or [],
         )

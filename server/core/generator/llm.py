@@ -63,6 +63,16 @@ class MockGenerator(BaseGenerator):
 | 税费 | 5万元 |
 | **合计** | **50万元** |"""
 
+    def generate_stream(self, prompt: str, system: str = "", **kwargs):
+        """按行吐出 generate() 的同一段文本，供无密钥时走 SSE 生成。"""
+        text = self.generate(prompt, system=system, **kwargs)
+        lines = text.splitlines(keepends=True)
+        if not lines and text:
+            yield text
+            return
+        for line in lines:
+            yield line
+
 
 class DeepSeekGenerator(BaseGenerator):
     """DeepSeek API（OpenAI 兼容格式）"""

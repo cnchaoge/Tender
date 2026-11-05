@@ -129,14 +129,13 @@ const rag = {
 // ── 标书生成 ──────────────────────────────────────────────────────────────────
 const bid = {
   parse: (filePath) => http.post("/api/bid/parse", { file_path: filePath }),
-  generate: (parseResult, materials) => http.post("/api/bid/generate", {
-    parse_result: parseResult,
-    materials
+  // 标书正文只走 SSE。页面此前用 authFetch 手写这一请求，axios 版 generate / generateStream
+  // 没有调用方，而且 axios 会把整段事件流缓冲完，带不上章节和策略。
+  openGenerateStream: (payload) => authFetch(`${apiBase()}/api/bid/generate/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   }),
-  generateStream: (parseResult, materials) => http.post("/api/bid/generate/stream", {
-    parse_result: parseResult,
-    materials
-  }, { timeout: 300000 }),
   download: (filename) => downloadWithAuth(
     `/api/bid/download/${encodeURIComponent(filename)}`,
     filename
