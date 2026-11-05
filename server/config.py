@@ -176,29 +176,66 @@ def resolve_secret_key(settings: Settings, data_dir: Path | None = None) -> str:
 
 @lru_cache
 def get_settings() -> Settings:
-    settings = Settings()
+    # Read the same .env file update_env() writes, independent of the process
+    # cwd. _env_file is accepted at runtime; the type stubs omit it.
+    settings = Settings(_env_file=BASE_DIR / ".env")  # type: ignore[call-arg]
     settings.SECRET_KEY = resolve_secret_key(settings)
     return settings
 
 
-def update_env(key: str, value: str):
-    """更新 .env 文件中的配置项"""
+def _env_assignment(key: str, value: str) -> str:
+    """Format one .env line. The value is never included in errors."""
+    if any(ch in value for ch in ("\n", "\r", "\x00")):
+        raise ValueError("invalid environment value")
+    if value == "" or any(ch in value for ch in (" ", "#", '"', "'", "\\", "\t")):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'{key}="{escaped}"'
+    return f"{key}={value}"
+
+
+def update_env_many(updates: dict[str, str]) -> None:
+    """Write config keys to .env and the current process environment.
+
+    This is the same store used by the model and embedding save endpoints.
+    Values are not logged. The next get_settings() call sees the new values.
+    """
+    if not updates:
+        return
+    for key, value in updates.items():
+        if not key or any(ch in key for ch in ("=", "\n", "\r", "\x00", " ", "#")):
+            raise ValueError("invalid environment key")
+        if any(ch in value for ch in ("\n", "\r", "\x00")):
+            raise ValueError("invalid environment value")
+
     env_path = BASE_DIR / ".env"
-    lines = []
+    lines: list[str] = []
     if env_path.exists():
         lines = env_path.read_text(encoding="utf-8").splitlines()
-    
-    found = False
-    new_lines = []
+
+    remaining = dict(updates)
+    new_lines: list[str] = []
     for line in lines:
-        if line.startswith(f"{key}="):
-            new_lines.append(f"{key}={value}")
-            found = True
-        else:
+        matched: str | None = None
+        for key in updates:
+            if line.startswith(f"{key}="):
+                matched = key
+                break
+        if matched is None:
             new_lines.append(line)
-    if not found:
-        new_lines.append(f"{key}={value}")
-    
+            continue
+        new_lines.append(_env_assignment(matched, updates[matched]))
+        remaining.pop(matched, None)
+    for key, value in remaining.items():
+        new_lines.append(_env_assignment(key, value))
+
     env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-    # 清除缓存，下次 get_settings() 会重新读取
+    for key, value in updates.items():
+        os.environ[key] = value
+    # Environment variables outrank .env. Clearing the cache is what makes
+    # the next get_settings() call return the values just saved.
     get_settings.cache_clear()
+
+
+def update_env(key: str, value: str):
+    """更新 .env 文件中的配置项"""
+    update_env_many({key: value})
