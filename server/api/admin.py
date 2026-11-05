@@ -7,10 +7,10 @@ import subprocess
 import threading
 import time
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from passlib.context import CryptContext
 from server.db.sqlite import LEGACY_ADMIN_PASSWORD, get_db
-from server.config import get_settings, update_env
+from server.config import get_settings, update_env, update_env_many
 from server.deps import require_admin
 
 # ============ 热重启 ============
@@ -60,8 +60,79 @@ class SystemConfig(BaseModel):
     ollama_embed_model: str
     dashscope_model: str
     deepseek_model: str
+    openai_model: str
+    minimax_model: str
     embed_provider: str
     dashscope_api_key_set: bool  # whether configured (no actual key)
+    deepseek_api_key_set: bool
+    openai_api_key_set: bool
+    minimax_api_key_set: bool
+
+
+# Settings form field names, plus the GET field names, so either shape can be saved.
+_LLM_PROVIDERS = frozenset({
+    "ollama", "dashscope", "openai", "minimax", "deepseek", "mock",
+})
+_EMBED_PROVIDERS = frozenset({"ollama", "dashscope", "bge", "m3e", "mock"})
+_MODEL_ENV_BY_PROVIDER = {
+    "ollama": "OLLAMA_MODEL",
+    "dashscope": "DASHSCOPE_MODEL",
+    "openai": "OPENAI_MODEL",
+    "minimax": "MINIMAX_MODEL",
+    "deepseek": "DEEPSEEK_MODEL",
+}
+_KEY_ENV_BY_PROVIDER = {
+    "dashscope": "DASHSCOPE_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+}
+_EXPLICIT_MODEL_FIELDS = {
+    "ollama_model": "OLLAMA_MODEL",
+    "dashscope_model": "DASHSCOPE_MODEL",
+    "openai_model": "OPENAI_MODEL",
+    "minimax_model": "MINIMAX_MODEL",
+    "deepseek_model": "DEEPSEEK_MODEL",
+}
+_EXPLICIT_KEY_FIELDS = {
+    "dashscope_api_key": "DASHSCOPE_API_KEY",
+    "openai_api_key": "OPENAI_API_KEY",
+    "minimax_api_key": "MINIMAX_API_KEY",
+    "deepseek_api_key": "DEEPSEEK_API_KEY",
+}
+
+
+class SystemConfigUpdate(BaseModel):
+    """Partial config update.
+
+    Accepts the settings form payload (`provider`, `api_key`, `model`,
+    `embed_provider`, `ollama_embed_model`) and the GET /config field names.
+    Blank API keys are left unchanged: GET never returns the key, so an empty
+    form field means "not editing the secret", not "clear it".
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    provider: str | None = None
+    llm_provider: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    embed_provider: str | None = None
+    ollama_embed_model: str | None = None
+    ollama_model: str | None = None
+    dashscope_model: str | None = None
+    deepseek_model: str | None = None
+    openai_model: str | None = None
+    minimax_model: str | None = None
+    dashscope_api_key: str | None = None
+    deepseek_api_key: str | None = None
+    openai_api_key: str | None = None
+    minimax_api_key: str | None = None
+    # Read-only flags echoed by GET. Ignored on write.
+    dashscope_api_key_set: bool | None = None
+    deepseek_api_key_set: bool | None = None
+    openai_api_key_set: bool | None = None
+    minimax_api_key_set: bool | None = None
 
 
 # ============ 用户管理 ============
@@ -179,9 +250,107 @@ def get_config():
         ollama_embed_model=s.OLLAMA_EMBED_MODEL or s.OLLAMA_MODEL,
         dashscope_model=s.DASHSCOPE_MODEL,
         deepseek_model=s.DEEPSEEK_MODEL,
+        openai_model=s.OPENAI_MODEL,
+        minimax_model=s.MINIMAX_MODEL,
         embed_provider=s.EMBED_PROVIDER,
         dashscope_api_key_set=bool(s.DASHSCOPE_API_KEY),
+        deepseek_api_key_set=bool(s.DEEPSEEK_API_KEY),
+        openai_api_key_set=bool(s.OPENAI_API_KEY),
+        minimax_api_key_set=bool(s.MINIMAX_API_KEY),
     )
+
+
+def _plain(value: object, label: str) -> str:
+    """Strip a config value and reject line breaks so .env stays one key per line."""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{label}无效")
+    if any(ch in value for ch in ("\n", "\r", "\x00")):
+        raise HTTPException(status_code=400, detail=f"{label}包含非法字符")
+    return value.strip()
+
+
+@router.put("/config", response_model=Resp)
+def update_config(body: SystemConfigUpdate):
+    """Save system config to .env. Admin only, same as the other admin routes.
+
+    The settings page PUTs the model form (`provider`, `api_key`, `model`,
+    `embed_provider`) and the embedding form (`embed_provider`,
+    `ollama_embed_model`). GET field names are accepted too.
+    """
+    fields = body.model_dump(exclude_unset=True)
+    updates: dict[str, str] = {}
+
+    def queue(env_key: str, value: str) -> None:
+        previous = updates.get(env_key)
+        if previous is not None and previous != value:
+            raise HTTPException(status_code=400, detail="配置项冲突")
+        updates[env_key] = value
+
+    provider: str | None = None
+    if "provider" in fields or "llm_provider" in fields:
+        chosen: list[str] = []
+        for raw in (fields.get("provider"), fields.get("llm_provider")):
+            if raw is None:
+                continue
+            text = _plain(raw, "模型提供商").lower()
+            if not text:
+                raise HTTPException(status_code=400, detail="模型提供商不能为空")
+            chosen.append(text)
+        if len(set(chosen)) > 1:
+            raise HTTPException(status_code=400, detail="provider 与 llm_provider 不一致")
+        if chosen:
+            provider = chosen[0]
+            if provider not in _LLM_PROVIDERS:
+                raise HTTPException(status_code=400, detail="不支持的模型提供商")
+            queue("LLM_PROVIDER", provider)
+
+    if provider is None:
+        provider = (get_settings().LLM_PROVIDER or "").strip().lower()
+
+    if "model" in fields and fields.get("model") is not None:
+        model_name = _plain(fields["model"], "模型")
+        env_key = _MODEL_ENV_BY_PROVIDER.get(provider)
+        if model_name and env_key:
+            queue(env_key, model_name)
+
+    for field, env_key in _EXPLICIT_MODEL_FIELDS.items():
+        if field in fields and fields.get(field) is not None:
+            model_name = _plain(fields[field], "模型")
+            if model_name:
+                queue(env_key, model_name)
+
+    if "embed_provider" in fields and fields.get("embed_provider") is not None:
+        embed = _plain(fields["embed_provider"], "Embedding 提供商").lower()
+        if not embed:
+            raise HTTPException(status_code=400, detail="Embedding 提供商不能为空")
+        if embed not in _EMBED_PROVIDERS:
+            raise HTTPException(status_code=400, detail="不支持的 Embedding 提供商")
+        queue("EMBED_PROVIDER", embed)
+
+    if "ollama_embed_model" in fields and fields.get("ollama_embed_model") is not None:
+        # Empty string is the settings form's "reuse the LLM model" choice.
+        queue("OLLAMA_EMBED_MODEL", _plain(fields["ollama_embed_model"], "Embedding 模型"))
+
+    if fields.get("api_key"):
+        secret = _plain(fields["api_key"], "API Key")
+        key_env = _KEY_ENV_BY_PROVIDER.get(provider)
+        if secret and key_env:
+            queue(key_env, secret)
+
+    for field, env_key in _EXPLICIT_KEY_FIELDS.items():
+        if fields.get(field):
+            secret = _plain(fields[field], "API Key")
+            if secret:
+                queue(env_key, secret)
+
+    if not updates:
+        return Resp(message="没有需要更新的配置")
+
+    try:
+        update_env_many(updates)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="配置值无效") from None
+    return Resp(message="配置已保存，需重启服务生效")
 
 
 # ============ AI 模型配置 ============

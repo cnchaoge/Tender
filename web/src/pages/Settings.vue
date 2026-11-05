@@ -263,7 +263,7 @@ async function verifyModel() {
 async function saveModel() {
   saving.value = true
   try {
-    await api.post("/api/admin/model/config", {
+    await api.put("/api/admin/config", {
       provider: cfg.value.provider,
       api_key: cfg.value.api_key,
       model: cfg.value.model,
@@ -288,7 +288,7 @@ function cancelModelEdit() {
 async function saveEmbed() {
   saving.value = true
   try {
-    await api.post("/api/admin/embed/config", {
+    await api.put("/api/admin/config", {
       embed_provider: cfg.value.embed_provider,
       ollama_embed_model: cfg.value.ollama_embed_model
     })
