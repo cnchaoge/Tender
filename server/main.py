@@ -22,8 +22,8 @@ import threading
 from server.db.sqlite import init_db
 from server.db.violation_db import init_violation_db
 from server.api import auth, kb, rag, bid, admin, price as price_api, checklist
-from server.api.bid import _init_builtin_templates
 from server.core.glossary import init_builtin_glossary
+from server.domain.generation.templates import _init_builtin_templates
 
 
 def _init_all_dbs():

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from server.api import bid
 from server.core.retriever import retriever
 from server.deps import get_current_user
+from server.domain.retrieval import recommend as recommend_mod
 
 WELD_QUERY = "螺旋焊管埋弧焊壁厚防腐焊缝"
 PRICE_TEXT = "分项报价表列示单价和投标保证金。"
@@ -189,7 +190,7 @@ def _seed(monkeypatch, tmp_path: Path):
 
     _store(1, _history_chunks())
     _store(2, other)
-    monkeypatch.setattr(bid, "get_db", getter)
+    monkeypatch.setattr(recommend_mod, "get_db", getter)
     monkeypatch.setattr(retriever, "get_db", getter)
     return getter
 
@@ -238,7 +239,7 @@ def test_preview_without_context_is_not_a_prefix(monkeypatch, tmp_path):
     def boom(*_args, **_kwargs):
         raise AssertionError("没有检索条件时不应去取切片")
 
-    monkeypatch.setattr(bid, "retrieve", boom)
+    monkeypatch.setattr(recommend_mod, "retrieve", boom)
     http = TestClient(_app())
     resp = http.get("/api/bid/recommend/1/preview")
     assert resp.status_code == 400
@@ -255,7 +256,7 @@ def test_preview_without_vectors_does_not_return_the_prefix(monkeypatch, tmp_pat
     conn.commit()
     conn.close()
     _use_memory_chroma(monkeypatch, TopicEmbedder())
-    monkeypatch.setattr(bid, "get_db", getter)
+    monkeypatch.setattr(recommend_mod, "get_db", getter)
     monkeypatch.setattr(retriever, "get_db", getter)
 
     http = TestClient(_app())
@@ -336,7 +337,9 @@ def test_preview_uses_parse_result_from_the_current_tender(monkeypatch, tmp_path
 
 
 def test_build_recommend_query_keeps_tender_context():
-    query = bid.build_recommend_query(
+    from server.domain.retrieval.recommend import build_recommend_query
+
+    query = build_recommend_query(
         "技术方案",
         {
             "project_name": "某油田地面工程物资采购",
@@ -351,8 +354,8 @@ def test_build_recommend_query_keeps_tender_context():
     # 技术方案章节不把工期塞进检索词，避免把进度类片段排到前面。
     assert "90日历天" not in query
     assert query.count("技术方案") == 1
-    assert bid.build_recommend_query(None, {"project_name": ""}, None) == ""
-    assert bid.build_recommend_query("  焊管防腐  ", None, None) == "焊管防腐"
+    assert build_recommend_query(None, {"project_name": ""}, None) == ""
+    assert build_recommend_query("  焊管防腐  ", None, None) == "焊管防腐"
 
 
 def test_retrieve_asks_chroma_for_the_selected_documents(monkeypatch, tmp_path):

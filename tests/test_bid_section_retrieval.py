@@ -261,9 +261,11 @@ def test_context_budget_keeps_every_section():
 
 def test_generate_paths_share_section_retrieval(monkeypatch):
     from server.api import bid
+    from server.domain.generation import materials, outline
+    from server.domain.generation import run as generation_run
 
-    for name in ("generate_bid", "generate_bid_stream", "plan_bid"):
-        source = inspect.getsource(getattr(bid, name))
+    for fn in (generation_run.generate_bid, generation_run.iter_generate_events, outline.plan_bid):
+        source = inspect.getsource(fn)
         assert "_retrieve_materials_text" in source
         assert "query_for_retrieve" not in source
 
@@ -277,12 +279,12 @@ def test_generate_paths_share_section_retrieval(monkeypatch):
         calls.append({"query": query, "top_k": top_k, "doc_ids": list(doc_ids or [])})
         return [{"id": f"c{len(calls)}", "text": "素材正文", "filename": "历史标书.docx"}]
 
-    monkeypatch.setattr(bid, "retrieve", fake_retrieve)
+    monkeypatch.setattr(materials, "retrieve", fake_retrieve)
     monkeypatch.setattr(
-        bid, "_load_material_docs", lambda ids: [{"id": 7, "filename": "历史标书.docx"}]
+        materials, "_load_material_docs", lambda ids: [{"id": 7, "filename": "历史标书.docx"}]
     )
 
-    grouped = bid._retrieve_materials_text(PARSE, [7], [TECH_CH, PRICE_CH])
+    grouped = materials._retrieve_materials_text(PARSE, [7], [TECH_CH, PRICE_CH])
     assert len(calls) == 2
     assert calls[0]["top_k"] == 2
     assert calls[0]["doc_ids"] == [7]
@@ -293,7 +295,7 @@ def test_generate_paths_share_section_retrieval(monkeypatch):
     assert "【分项报价表】" in grouped
 
     calls.clear()
-    bid._retrieve_materials_text(PARSE, [7], None)
+    materials._retrieve_materials_text(PARSE, [7], None)
     assert len(calls) == 1
     assert calls[0]["top_k"] == 3
     assert calls[0]["query"] != _coarse_query()
