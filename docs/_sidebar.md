@@ -20,3 +20,5 @@
   * [管理后台](/manual/04-features#管理后台)
 * [五、常见问题](/manual/05-faq)
 * [六、技术架构](/manual/06-architecture)
+* [目标架构](/target-architecture)
+* [生产就绪评估](/production-readiness)
