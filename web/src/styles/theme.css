@@ -1,0 +1,135 @@
+/* Tender — cool IBM Carbon–like enterprise theme.
+   Tokens live here; Element Plus reads the --el-* variables. */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+SC:wght@400;500;600&display=swap");
+
+:root {
+  color-scheme: light;
+
+  /* Interactive */
+  --color-primary: #0f62fe;
+  --color-primary-hover: #0043ce;
+  --color-primary-focus: #002d9c;
+  --color-primary-wash: rgba(15, 98, 254, 0.1);
+  --color-primary-wash-strong: rgba(15, 98, 254, 0.16);
+  --color-on-primary: #ffffff;
+
+  /* Text */
+  --color-ink: #161616;
+  --color-ink-muted: #525252;
+  --color-ink-subtle: #6f6f6f;
+  --color-ink-tertiary: #8d8d8d;
+
+  /* Surfaces — cool gray canvas, white cards */
+  --color-canvas: #f4f4f4;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f4f4f4;
+  --color-surface-3: #e8e8e8;
+  --color-surface-4: #e0e0e0;
+
+  --color-hairline: #e0e0e0;
+  --color-hairline-strong: #c6c6c6;
+  --color-hairline-tertiary: #8d8d8d;
+
+  --color-inverse-canvas: #161616;
+  --color-inverse-surface-1: #262626;
+  --color-inverse-ink: #f4f4f4;
+
+  --color-brand-secure: #0f62fe;
+  --color-semantic-success: #0e6027;
+  --color-semantic-warning: #8a6a00;
+  --color-semantic-error: #da1e28;
+  --color-danger: #da1e28;
+  --color-success: #24a148;
+
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+
+  /* Carbon is square; the product mock uses a slight corner */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+
+  --font-sans: "IBM Plex Sans", "IBM Plex Sans SC", "PingFang SC", "Noto Sans SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Element Plus */
+  --el-color-primary: #0f62fe;
+  --el-color-primary-rgb: 15, 98, 254;
+  --el-color-primary-light-3: #4589ff;
+  --el-color-primary-light-5: #78a9ff;
+  --el-color-primary-light-7: #a6c8ff;
+  --el-color-primary-light-8: #d0e2ff;
+  --el-color-primary-light-9: #edf5ff;
+  --el-color-primary-dark-2: #0043ce;
+  --el-color-success: #24a148;
+  --el-color-success-light-3: #6fdc8c;
+  --el-color-success-light-5: #a7f0ba;
+  --el-color-success-light-7: #defbe6;
+  --el-color-success-light-8: #defbe6;
+  --el-color-success-light-9: #defbe6;
+  --el-color-success-dark-2: #0e6027;
+  --el-color-warning: #f1c21b;
+  --el-color-warning-light-3: #fddc69;
+  --el-color-warning-light-5: #fde8a4;
+  --el-color-warning-light-7: #fcf4d6;
+  --el-color-warning-light-8: #fcf4d6;
+  --el-color-warning-light-9: #fcf4d6;
+  --el-color-warning-dark-2: #8a6a00;
+  --el-color-danger: #da1e28;
+  --el-color-danger-light-3: #fa4d56;
+  --el-color-danger-light-5: #ff8389;
+  --el-color-danger-light-7: #ffd7d9;
+  --el-color-danger-light-8: #fff1f1;
+  --el-color-danger-light-9: #fff1f1;
+  --el-color-danger-dark-2: #a2191f;
+  --el-color-error: #da1e28;
+  --el-color-info: #0043ce;
+
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f4f4f4;
+  --el-bg-color-overlay: #ffffff;
+  --el-text-color-primary: #161616;
+  --el-text-color-regular: #393939;
+  --el-text-color-secondary: #525252;
+  --el-text-color-placeholder: #8d8d8d;
+  --el-text-color-disabled: #c6c6c6;
+  --el-border-color: #e0e0e0;
+  --el-border-color-light: #e0e0e0;
+  --el-border-color-lighter: #e8e8e8;
+  --el-border-color-extra-light: #f4f4f4;
+  --el-border-color-dark: #8d8d8d;
+  --el-border-color-hover: #0f62fe;
+  --el-fill-color: #f4f4f4;
+  --el-fill-color-light: #f4f4f4;
+  --el-fill-color-lighter: #f4f4f4;
+  --el-fill-color-blank: #ffffff;
+  --el-fill-color-dark: #e8e8e8;
+  --el-mask-color: rgba(22, 22, 22, 0.45);
+
+  --el-border-radius-base: 4px;
+  --el-border-radius-small: 2px;
+  --el-border-radius-round: 4px;
+  --el-border-radius-circle: 50%;
+
+  --el-font-family: var(--font-sans);
+  --el-font-size-base: 14px;
+  --el-box-shadow: 0 2px 6px rgba(22, 22, 22, 0.08);
+  --el-box-shadow-light: 0 2px 6px rgba(22, 22, 22, 0.06);
+  --el-box-shadow-lighter: 0 1px 2px rgba(22, 22, 22, 0.06);
+}
+
+html,
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}

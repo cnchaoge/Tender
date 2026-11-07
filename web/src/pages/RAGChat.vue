@@ -3,7 +3,7 @@
 
     <div class="page-header">
       <div class="eyebrow">知识检索</div>
-      <h1 class="page-title">RAG 问答</h1>
+      <h1 class="page-title">智能问答</h1>
     </div>
 
     <div class="chat-container">
@@ -181,7 +181,7 @@ function scrollBottom() {
 .chat-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 56px - 48px); /* viewport - topbar - padding */
+  height: calc(100vh - 52px);
   padding-bottom: 0;
 }
 
@@ -265,8 +265,8 @@ function scrollBottom() {
   margin-top: 2px;
 }
 .msg-row.assistant .msg-avatar {
-  background: rgba(59, 130, 246, 0.1);
-  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(15, 98, 254, 0.1);
+  border-color: rgba(15, 98, 254, 0.2);
   color: var(--color-primary);
 }
 
@@ -304,7 +304,7 @@ function scrollBottom() {
 .msg-text :deep(code) { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
 .msg-text :deep(pre) { background: rgba(0,0,0,0.06); padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 4px 0; }
 .msg-text :deep(pre code) { background: none; padding: 0; }
-.msg-text :deep(blockquote) { border-left: 3px solid rgba(59,130,246,0.4); margin: 4px 0; padding: 2px 10px; color: var(--color-ink-subtle); }
+.msg-text :deep(blockquote) { border-left: 3px solid rgba(15, 98, 254,0.4); margin: 4px 0; padding: 2px 10px; color: var(--color-ink-subtle); }
 .msg-text :deep(table) { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 6px; }
 .msg-text :deep(th), .msg-text :deep(td) { border: 1px solid var(--color-hairline); padding: 4px 8px; text-align: left; }
 .msg-text :deep(th) { background: var(--color-surface-3); font-weight: 500; }
@@ -392,10 +392,12 @@ function scrollBottom() {
 }
 
 /* ── Responsive ── */
-@media (max-width: 640px) {
+@media (max-width: 1024px) {
   .chat-page {
     height: calc(100vh - 56px - 32px);
   }
+}
+@media (max-width: 640px) {
   .msg-bubble {
     max-width: 85%;
   }

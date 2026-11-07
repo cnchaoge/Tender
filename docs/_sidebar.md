@@ -16,7 +16,7 @@
 * [四、功能详解](/manual/04-features)
   * [知识库管理](/manual/04-features#知识库管理)
   * [标书生成](/manual/04-features#标书生成)
-  * [企业 RAG 问答](/manual/04-features#企业-rag-问答)
+  * [智能问答](/manual/04-features#智能问答)
   * [管理后台](/manual/04-features#管理后台)
 * [五、常见问题](/manual/05-faq)
 * [六、技术架构](/manual/06-architecture)

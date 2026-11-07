@@ -515,7 +515,7 @@ defineExpose({ loadFromParseResult })
 }
 .template-item:hover {
   border-color: var(--color-primary);
-  background: rgba(94, 105, 209, 0.06);
+  background: rgba(15, 98, 254, 0.06);
 }
 .template-name {
   font-size: 14px;
@@ -552,7 +552,7 @@ defineExpose({ loadFromParseResult })
 .history-item:hover,
 .history-item.active {
   border-color: var(--color-primary);
-  background: rgba(94, 105, 209, 0.04);
+  background: rgba(15, 98, 254, 0.04);
 }
 .history-name {
   font-size: 13px;
