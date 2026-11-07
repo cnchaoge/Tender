@@ -1,5 +1,11 @@
 # 六、技术架构
 
+> **阅读说明（2026-11-07）**
+>
+> 本页保留 2026-05-15 的 MVP 记录，下面的图和表仍是当时的写法。图中只画了云端模型 API，部署写成 PyInstaller 单文件。对照当前代码：默认 LLM 与 Embedding 是本机 Ollama（`LLM_PROVIDER` / `EMBED_PROVIDER`），也可以选用 DeepSeek、通义、OpenAI、MiniMax；切片正文同时在 SQLite `chunks` 和 ChromaDB，Chroma 是检索用的向量副本。
+>
+> 下一步的结构设计见 [目标架构](/target-architecture)。备份、单进程和相对路径 `/api` 等运行差距见 [生产就绪评估](/production-readiness)。
+
 ## 系统架构图
 
 ```
