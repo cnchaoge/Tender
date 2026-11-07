@@ -1357,7 +1357,7 @@ async function doGenerate() {
 }
 .upload-zone:hover {
   border-color: var(--color-primary);
-  background: rgba(94, 105, 209, 0.04);
+  background: rgba(15, 98, 254, 0.04);
 }
 .upload-icon {
   width: 40px;
@@ -1516,7 +1516,7 @@ async function doGenerate() {
   padding: 3px 10px;
   border-radius: 4px;
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(94, 105, 209, 0.3);
+  box-shadow: 0 2px 8px rgba(15, 98, 254, 0.3);
 }
 .scoring-total {
   font-size: 12px;
@@ -1582,7 +1582,7 @@ async function doGenerate() {
   border-left-color: #f59e0b;
 }
 .scoring-item.expert-item {
-  background: rgba(59, 130, 246, 0.06);
+  background: rgba(15, 98, 254, 0.06);
   border-left-color: var(--color-primary);
 }
 .scoring-item-row {
@@ -1626,7 +1626,7 @@ async function doGenerate() {
   font-weight: 500;
 }
 .scoring-item-type.expert {
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(15, 98, 254, 0.12);
   color: var(--color-primary);
 }
 .scoring-item-type.formula {
@@ -1723,11 +1723,11 @@ async function doGenerate() {
 }
 .template-item:hover {
   border-color: var(--color-primary);
-  background: rgba(59, 130, 246, 0.03);
+  background: rgba(15, 98, 254, 0.03);
 }
 .template-item.active {
   border-color: var(--color-primary);
-  background: rgba(59, 130, 246, 0.06);
+  background: rgba(15, 98, 254, 0.06);
 }
 .template-radio {
   flex-shrink: 0;
@@ -2041,7 +2041,7 @@ async function doGenerate() {
 .meta-reason {
   font-size: 11px;
   color: var(--color-primary);
-  background: rgba(94, 105, 209, 0.08);
+  background: rgba(15, 98, 254, 0.08);
   padding: 1px 6px;
   border-radius: 3px;
   white-space: nowrap;
@@ -2126,13 +2126,13 @@ async function doGenerate() {
 }
 .strategy-tab:hover {
   border-color: var(--color-primary);
-  background: rgba(94, 105, 209, 0.04);
+  background: rgba(15, 98, 254, 0.04);
   transform: translateY(-1px);
 }
 .strategy-tab.active {
   border-color: var(--color-primary);
-  background: rgba(94, 105, 209, 0.08);
-  box-shadow: 0 0 0 3px rgba(94, 105, 209, 0.12);
+  background: rgba(15, 98, 254, 0.08);
+  box-shadow: 0 0 0 3px rgba(15, 98, 254, 0.12);
 }
 .strategy-tab-inner {
   display: flex;
@@ -2227,7 +2227,7 @@ async function doGenerate() {
   background: var(--color-primary);
   border-color: var(--color-primary);
   color: #fff;
-  box-shadow: 0 0 0 4px rgba(94, 105, 209, 0.2);
+  box-shadow: 0 0 0 4px rgba(15, 98, 254, 0.2);
 }
 .gen-step.done .gen-step-icon {
   background: var(--color-semantic-success);
@@ -2290,8 +2290,8 @@ async function doGenerate() {
   border: 1px solid var(--color-hairline);
 }
 .chapter-progress-item.generating {
-  background: rgba(59, 130, 246, 0.04);
-  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(15, 98, 254, 0.04);
+  border-color: rgba(15, 98, 254, 0.2);
 }
 .chapter-progress-item.completed {
   background: rgba(34, 197, 94, 0.04);
@@ -2318,7 +2318,7 @@ async function doGenerate() {
 .status-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(59, 130, 246, 0.3);
+  border: 2px solid rgba(15, 98, 254, 0.3);
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -2348,7 +2348,7 @@ async function doGenerate() {
   color: var(--color-ink-tertiary);
 }
 .chapter-status-tag.generating {
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(15, 98, 254, 0.12);
   color: var(--color-primary);
 }
 .chapter-status-tag.completed {
@@ -2365,11 +2365,11 @@ async function doGenerate() {
 .progress-striped :deep(.el-progress-bar__outer) {
   background-image: linear-gradient(
     45deg,
-    rgba(59, 130, 246, 0.15) 25%,
+    rgba(15, 98, 254, 0.15) 25%,
     transparent 25%,
     transparent 50%,
-    rgba(59, 130, 246, 0.15) 50%,
-    rgba(59, 130, 246, 0.15) 75%,
+    rgba(15, 98, 254, 0.15) 50%,
+    rgba(15, 98, 254, 0.15) 75%,
     transparent 75%
   );
   background-size: 16px 16px;
@@ -2697,7 +2697,7 @@ async function doGenerate() {
 .streaming-html :deep(code) { background: var(--color-surface-2); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
 .streaming-html :deep(pre) { background: var(--color-surface-2); padding: 10px; border-radius: var(--radius-md); overflow-x: auto; margin-bottom: 8px; }
 .streaming-html :deep(pre code) { background: none; padding: 0; }
-.streaming-html :deep(blockquote) { border-left: 3px solid var(--color-primary); margin: 0 0 8px; padding: 4px 10px; background: rgba(59, 130, 246, 0.05); color: var(--color-ink-subtle); }
+.streaming-html :deep(blockquote) { border-left: 3px solid var(--color-primary); margin: 0 0 8px; padding: 4px 10px; background: rgba(15, 98, 254, 0.05); color: var(--color-ink-subtle); }
 
 /* ── Plan Dialog ── */
 .plan-intro {

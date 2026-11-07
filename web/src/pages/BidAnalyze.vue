@@ -306,7 +306,7 @@ async function viewAnalyzedSections(docId) {
 .upload-zone:hover,
 .upload-zone.dragging {
   border-color: var(--color-primary);
-  background: rgba(94, 105, 209, 0.04);
+  background: rgba(15, 98, 254, 0.04);
 }
 .upload-icon {
   width: 44px;

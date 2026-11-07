@@ -2,11 +2,17 @@
   <div class="login-page">
     <div class="login-card">
       <div class="login-logo">
-        <div class="logo-icon">⚡</div>
-        <div class="logo-name">Tender</div>
+        <BrandMark />
+        <div>
+          <div class="logo-name">Tender</div>
+          <div class="logo-sub">制造业投标写作</div>
+        </div>
       </div>
 
-      <p class="login-title">登录</p>
+      <div>
+        <p class="login-title">登录</p>
+        <p class="login-note">使用企业账号进入工作台</p>
+      </div>
 
       <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
         <el-form-item prop="username">
@@ -49,6 +55,7 @@ import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
 import { User, Lock } from "@element-plus/icons-vue"
 import { useAuthStore } from "../stores/auth"
+import BrandMark from "../components/BrandMark.vue"
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -96,37 +103,45 @@ async function handleLogin() {
 
 .login-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 400px;
   background: var(--color-surface-1);
   border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-xl);
-  padding: 40px 32px;
+  border-top: 3px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  padding: 32px 28px 28px;
   display: flex;
   flex-direction: column;
   gap: 20px;
+  box-shadow: 0 2px 6px rgba(22, 22, 22, 0.06);
 }
 
 .login-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-.logo-icon {
-  font-size: 28px;
+  gap: 12px;
 }
 .logo-name {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 600;
   color: var(--color-ink);
-  letter-spacing: -0.5px;
+  line-height: 1.2;
+}
+.logo-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
 }
 
 .login-title {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
   color: var(--color-ink);
-  letter-spacing: -0.4px;
   margin: 0;
+}
+.login-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
 }
 
 .login-btn {

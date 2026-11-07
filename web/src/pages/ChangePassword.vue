@@ -2,8 +2,11 @@
   <div class="login-page">
     <div class="login-card">
       <div class="login-logo">
-        <div class="logo-icon">⚡</div>
-        <div class="logo-name">Tender</div>
+        <BrandMark />
+        <div>
+          <div class="logo-name">Tender</div>
+          <div class="logo-sub">制造业投标写作</div>
+        </div>
       </div>
 
       <p class="login-title">设置新密码</p>
@@ -64,6 +67,7 @@ import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
 import { Lock } from "@element-plus/icons-vue"
 import { useAuthStore } from "../stores/auth"
+import BrandMark from "../components/BrandMark.vue"
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -134,29 +138,33 @@ function handleLogout() {
 
 .login-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 400px;
   background: var(--color-surface-1);
   border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-xl);
-  padding: 40px 32px;
+  border-top: 3px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  padding: 32px 28px 28px;
   display: flex;
   flex-direction: column;
   gap: 20px;
+  box-shadow: 0 2px 6px rgba(22, 22, 22, 0.06);
 }
 
 .login-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-.logo-icon {
-  font-size: 28px;
+  gap: 12px;
 }
 .logo-name {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 600;
   color: var(--color-ink);
-  letter-spacing: -0.5px;
+  line-height: 1.2;
+}
+.logo-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
 }
 
 .login-title {

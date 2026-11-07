@@ -3,7 +3,8 @@
 
     <div class="page-header">
       <div class="eyebrow">系统</div>
-      <h1 class="page-title">设置</h1>
+      <h1 class="page-title">系统设置</h1>
+      <p class="page-desc">模型、向量与企业用户</p>
     </div>
 
     <div class="settings-grid">
@@ -55,7 +56,7 @@
           <el-form-item class="form-actions">
             <el-button v-if="cfg.provider !== 'ollama'" type="primary" :loading="v.loading" @click="verifyModel">验证</el-button>
             <el-button :disabled="cfg.provider !== 'ollama' && !v.model_ok" :loading="saving" @click="saveModel">保存</el-button>
-            <el-button type="info" @click="cancelModelEdit">取消</el-button>
+            <el-button @click="cancelModelEdit">取消</el-button>
           </el-form-item>
         </el-form>
         <div v-else class="form-actions">
@@ -107,7 +108,7 @@
           </div>
           <el-form-item class="form-actions">
             <el-button type="primary" :loading="saving" @click="saveEmbed">保存</el-button>
-            <el-button type="info" @click="cancelEmbedEdit">取消</el-button>
+            <el-button @click="cancelEmbedEdit">取消</el-button>
           </el-form-item>
         </el-form>
         <div v-else class="form-actions">
@@ -395,7 +396,8 @@ async function submitEdit(id) {
 
 <style scoped>
 .settings-page {
-  padding-bottom: 64px;
+  padding: 0 0 40px;
+  max-width: 1180px;
 }
 
 .page-header {
@@ -413,7 +415,12 @@ async function submitEdit(id) {
   font-size: 26px;
   font-weight: 600;
   color: var(--color-ink);
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
+}
+.page-desc {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
 }
 
 /* ── Grid ── */
@@ -447,9 +454,9 @@ async function submitEdit(id) {
 .model-name-tag {
   font-size: 11px;
   font-weight: 500;
-  background: rgba(59, 130, 246, 0.1);
+  background: var(--color-primary-wash);
   color: var(--color-primary);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(15, 98, 254, 0.2);
   padding: 2px 8px;
   border-radius: var(--radius-xs);
 }
@@ -509,9 +516,9 @@ async function submitEdit(id) {
   border: 1px solid rgba(245, 108, 108, 0.2);
 }
 .role-tag.user {
-  background: rgba(94, 105, 209, 0.1);
+  background: var(--color-primary-wash);
   color: var(--color-primary);
-  border: 1px solid rgba(94, 105, 209, 0.2);
+  border: 1px solid rgba(15, 98, 254, 0.2);
 }
 
 /* ── Add User ── */
@@ -545,6 +552,9 @@ async function submitEdit(id) {
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
+  .settings-page {
+    padding: 0 0 32px;
+  }
   .settings-grid {
     grid-template-columns: 1fr;
   }
