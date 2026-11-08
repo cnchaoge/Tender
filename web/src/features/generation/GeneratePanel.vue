@@ -22,16 +22,19 @@
     </div>
   </div>
 
-  <el-button
-    type="primary"
-    class="generate-btn"
-    :loading="generating"
-    :disabled="!parseResult || selectedMaterials.length === 0"
-    @click="emit('generate')"
-  >
-    <el-icon v-if="!generating"><component :is="Files" /></el-icon>
-    生成投标标书
-  </el-button>
+  <div class="generate-actions">
+    <el-button
+      type="primary"
+      class="generate-btn"
+      :loading="generating"
+      :disabled="!parseResult || selectedMaterials.length === 0"
+      @click="emit('generate')"
+    >
+      <el-icon v-if="!generating"><component :is="Files" /></el-icon>
+      生成投标标书
+    </el-button>
+    <el-button v-if="generating" class="cancel-btn" @click="emit('cancel')">停止生成</el-button>
+  </div>
 
   <!-- Generating State -->
   <div v-if="generating" class="generating-panel">
@@ -210,7 +213,7 @@ defineProps({
   violationResult: { type: Object, default: null },
   plagiarismResult: { type: Object, default: null },
 })
-const emit = defineEmits(["update:selectedStrategy", "generate", "download"])
+const emit = defineEmits(["update:selectedStrategy", "generate", "download", "cancel"])
 
 const strategyOptions = [
   { label: "技术优先型", value: "技术优先型", icon: "🔧", desc: "技术方案详细、质量最高、价格适中" },

@@ -179,7 +179,7 @@ def test_pipeline_uses_generate_or_stream_and_retries_once(monkeypatch):
 
 
 def test_routes_delegate_prompt_building():
-    """路由只转发。提示词和重写仍在领域模块，两条路径共用 BidDraftPipeline。"""
+    """路由只转发。提示词和重写仍在领域模块，作业执行仍走 BidDraftPipeline。"""
     from server.api import bid
     from server.domain.generation import run as generation_run
 
@@ -191,7 +191,7 @@ def test_routes_delegate_prompt_building():
         assert "根据以下招标文件要求" not in source
         assert "_get_strategy_guidance" not in source
 
-    for fn in (generation_run.generate_bid, generation_run.iter_generate_events):
+    for fn in (generation_run.generate_bid, generation_run.execute_generate_job):
         source = inspect.getsource(fn)
         assert "BidDraftPipeline" in source
         assert "_retrieve_materials_text" in source
@@ -241,10 +241,62 @@ def _parse_sse(raw: bytes) -> list[dict]:
 
 
 def _install(monkeypatch, gen, reviews, violation=None):
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
     from server.api import bid
+    from server.db import sqlite as sqlite_mod
     from server.domain.export import docx
     from server.domain.generation import draft
     from server.domain.generation import run as generation_run
+    from server.workers.runner import shutdown_runner
+
+    shutdown_runner(wait=True)
+    data = Path(tempfile.mkdtemp())
+    db_path = data / "jobs.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            progress INTEGER NOT NULL DEFAULT 0,
+            message TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            result_json TEXT,
+            cancel_requested INTEGER NOT NULL DEFAULT 0,
+            runtime_json TEXT NOT NULL DEFAULT '{}',
+            idempotency_key TEXT,
+            project_id INTEGER,
+            document_id INTEGER,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            finished_at TIMESTAMP
+        );
+        CREATE TABLE job_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    def getter():
+        link = sqlite3.connect(db_path, check_same_thread=False)
+        link.row_factory = sqlite3.Row
+        return link
+
+    monkeypatch.setattr(sqlite_mod, "DB_PATH", db_path)
+    monkeypatch.setattr(sqlite_mod, "get_db", getter)
 
     violation = violation or _Violation()
     saved = {}
@@ -257,9 +309,13 @@ def _install(monkeypatch, gen, reviews, violation=None):
     def fake_review(content, parse_result):
         return reviews.pop(0)
 
-    def fake_save(**kwargs):
+    def fake_insert(**kwargs):
         saved.update(kwargs)
         return 11
+
+    def fake_update(version_id, **kwargs):
+        saved["version_id"] = version_id
+        saved.update({key: value for key, value in kwargs.items() if value is not None})
 
     monkeypatch.setattr(generation_run, "get_generator", lambda: gen)
     monkeypatch.setattr(generation_run, "_retrieve_materials_text", fake_retrieve)
@@ -267,7 +323,9 @@ def _install(monkeypatch, gen, reviews, violation=None):
     monkeypatch.setattr(generation_run, "_check_format_compliance", lambda content, parse: {"passed": True, "score": 80, "warnings": []})
     monkeypatch.setattr(generation_run, "get_violation_checker", lambda: violation)
     monkeypatch.setattr(generation_run, "get_plagiarism_checker", lambda: _Plagiarism())
-    monkeypatch.setattr(generation_run, "_save_bid_version", fake_save)
+    monkeypatch.setattr(generation_run, "insert_draft_version", fake_insert)
+    monkeypatch.setattr(generation_run, "update_draft_version", fake_update)
+    monkeypatch.setattr(generation_run, "discard_empty_draft", lambda version_id: None)
     monkeypatch.setattr(draft, "review_bid", fake_review)
     return bid, saved, retrievals, violation
 
@@ -280,7 +338,12 @@ def _collect_sse(bid, req) -> list[dict]:
             chunks.append(chunk if isinstance(chunk, (bytes, bytearray)) else str(chunk).encode())
         return b"".join(chunks)
 
-    return _parse_sse(asyncio.run(_run()))
+    try:
+        return _parse_sse(asyncio.run(_run()))
+    finally:
+        from server.workers.runner import shutdown_runner
+
+        shutdown_runner(wait=True)
 
 
 def test_batch_and_stream_share_one_prompt_and_section_retrieval(monkeypatch):
@@ -360,5 +423,6 @@ def test_stream_stops_before_llm_when_precheck_fails(monkeypatch):
     assert events[1]["violation_result"]["violations"][0]["rule"] == "保证金"
     assert gen.prompts == []
     assert gen.stream_prompts == []
-    assert saved == {}
+    assert saved.get("file_path", "") == ""
+    assert saved.get("bid_content", "") == ""
     assert retrievals and violation.calls == [""]

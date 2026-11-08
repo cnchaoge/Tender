@@ -11,7 +11,10 @@ def list_bid_versions(project_name: Optional[str] = None, project_id: Optional[i
     """获取标书历史版本列表（按时间倒序）。传 project_id 时不再按名称模糊匹配。"""
     conn = get_db()
     cur = conn.cursor()
-    columns = "id, project_name, strategy, generated_at, file_path, material_ids, project_id"
+    columns = (
+        "id, project_name, strategy, generated_at, file_path, material_ids, "
+        "project_id, parse_id, status, job_id"
+    )
     if project_id:
         cur.execute(
             f"""SELECT {columns}
@@ -46,7 +49,8 @@ def get_bid_version(version_id: int):
     cur = conn.cursor()
     cur.execute(
         """SELECT id, project_name, parse_result_json, bid_content, strategy,
-                  generated_at, file_path, material_ids, project_id
+                  generated_at, file_path, material_ids, project_id, parse_id,
+                  status, outline_json, runtime_json, job_id
            FROM bid_versions WHERE id = ?""",
         (version_id,)
     )
@@ -106,6 +110,92 @@ def restore_bid_version(version_id: int):
         "project_name": version.get("project_name", ""),
         "version_id": version_id,
     }
+
+
+def insert_draft_version(
+    *,
+    project_name: str,
+    parse_result: dict,
+    strategy: str,
+    material_ids: List[int],
+    project_id: Optional[int] = None,
+    parse_id: Optional[int] = None,
+    outline: Optional[list] = None,
+    runtime: Optional[dict] = None,
+    job_id: Optional[int] = None,
+) -> int:
+    """生成一开始就落下 status=draft 的版本。正文先空着，章节边界再更新。"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO bid_versions
+           (project_name, parse_result_json, bid_content, strategy, file_path,
+            material_ids, project_id, parse_id, status, outline_json, runtime_json, job_id)
+           VALUES (?, ?, '', ?, '', ?, ?, ?, 'draft', ?, ?, ?)""",
+        (
+            project_name,
+            json.dumps(parse_result or {}, ensure_ascii=False),
+            strategy or "",
+            json.dumps(material_ids or [], ensure_ascii=False),
+            project_id,
+            parse_id,
+            json.dumps(outline or [], ensure_ascii=False),
+            json.dumps(runtime or {}, ensure_ascii=False),
+            job_id,
+        ),
+    )
+    conn.commit()
+    version_id = int(cur.lastrowid)
+    conn.close()
+    return version_id
+
+
+def update_draft_version(version_id: int, **fields) -> None:
+    """按章节或收尾更新同一条草稿。未知字段忽略。"""
+    allowed = {
+        "bid_content": "bid_content",
+        "status": "status",
+        "file_path": "file_path",
+        "strategy": "strategy",
+    }
+    assignments = []
+    params: list = []
+    for key, column in allowed.items():
+        if key in fields and fields[key] is not None:
+            assignments.append(f"{column} = ?")
+            params.append(fields[key])
+    if "material_ids" in fields and fields["material_ids"] is not None:
+        assignments.append("material_ids = ?")
+        params.append(json.dumps(fields["material_ids"], ensure_ascii=False))
+    if not assignments:
+        return
+    params.append(int(version_id))
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE bid_versions SET {', '.join(assignments)} WHERE id = ?",
+            params,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def discard_empty_draft(version_id: int) -> None:
+    """预检失败时不留下空白版本。"""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """DELETE FROM bid_versions
+               WHERE id = ? AND status = 'draft'
+                 AND (bid_content IS NULL OR bid_content = '')""",
+            (int(version_id),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _save_bid_version(

@@ -8,7 +8,12 @@ settings = get_settings()
 
 
 def get_embedder():
-    """根据配置返回 Embedding 实例"""
+    """根据配置返回 Embedding 实例。作业线程里返回该作业快照对应的实例。"""
+    from server.domain.jobs.runtime import pinned_embedder
+
+    pinned = pinned_embedder()
+    if pinned is not None:
+        return pinned
     provider = settings.EMBED_PROVIDER
 
     if provider == "ollama":
@@ -28,9 +33,9 @@ def get_embedder():
 class DashScopeEmbedder:
     """通义 Embedding"""
 
-    def __init__(self):
+    def __init__(self, model: str | None = None):
         import httpx
-        self.model = settings.DASHSCOPE_EMBED_MODEL
+        self.model = model or settings.DASHSCOPE_EMBED_MODEL
         self.api_key = settings.DASHSCOPE_API_KEY
         self.url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
 
@@ -89,10 +94,10 @@ class M3EEmbedder:
 class OllamaEmbedder:
     """Ollama 本地 Embedding（通过 Ollama API 调用）"""
 
-    def __init__(self):
+    def __init__(self, model: str | None = None):
         import httpx
         self.base_url = settings.OLLAMA_BASE_URL.rstrip("/")
-        self.model = settings.OLLAMA_EMBED_MODEL or settings.OLLAMA_MODEL
+        self.model = model or settings.OLLAMA_EMBED_MODEL or settings.OLLAMA_MODEL
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         import httpx

@@ -21,7 +21,7 @@ import threading
 
 from server.db.sqlite import init_db
 from server.db.violation_db import init_violation_db
-from server.api import auth, kb, rag, bid, admin, price as price_api, checklist, projects
+from server.api import auth, kb, rag, bid, admin, price as price_api, checklist, projects, jobs as jobs_api
 from server.core.glossary import init_builtin_glossary
 from server.domain.generation.templates import _init_builtin_templates
 
@@ -42,13 +42,25 @@ def _init_all_dbs():
         ensure_active_index_if_empty()
     except Exception as exc:
         print(f"[Index] 索引身份初始化失败: {exc}")
-    # In-process workers die with the server. Pick up rows left pending or
-    # processing by the previous process and discard any half-written chunks.
+    # 生成类保持 interrupted，不自动接着调用模型。入库 / 重建清掉半成品后重新排队。
+    try:
+        from server.domain.jobs.store import reconcile_after_restart
+
+        reconcile_after_restart()
+    except Exception as exc:
+        print(f"[Jobs] reconcile failed: {exc}")
+    # 还没有作业行的旧文档，仍按 pending/processing 再排一次。
     try:
         from server.workers.document_worker import requeue_incomplete_documents
         requeue_incomplete_documents()
     except Exception as exc:
         print(f"[KB] requeue incomplete documents failed: {exc}")
+    try:
+        from server.workers.runner import ensure_runner
+
+        ensure_runner()
+    except Exception as exc:
+        print(f"[Jobs] runner failed to start: {exc}")
 
 
 @asynccontextmanager
@@ -58,6 +70,9 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         from server.workers.executor import shutdown_executor
+        from server.workers.runner import shutdown_runner
+
+        shutdown_runner(wait=False)
         shutdown_executor(wait=False)
 
 
@@ -87,6 +102,7 @@ app.include_router(admin.router)
 app.include_router(price_api.router)
 app.include_router(checklist.router)
 app.include_router(projects.router)
+app.include_router(jobs_api.router)
 
 # 静态文件（前端dist）。assets 目录在未构建时可能不存在，不能因此让应用无法启动。
 WEB_DIST = _get_resource_path("web/dist")

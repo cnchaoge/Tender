@@ -39,6 +39,33 @@ CREATE TABLE chunks (
     text TEXT NOT NULL,
     metadata TEXT
 );
+CREATE TABLE jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    progress INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    runtime_json TEXT NOT NULL DEFAULT '{}',
+    idempotency_key TEXT,
+    project_id INTEGER,
+    document_id INTEGER,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP
+);
+CREATE TABLE job_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -289,15 +316,21 @@ def test_unsupported_upload_rejected(client):
 
 
 def test_upload_returns_while_worker_is_still_blocked(getter, tmp_path, monkeypatch):
+    from server.db import sqlite as sqlite_mod
+    from server.workers.runner import shutdown_runner
+
     gate = threading.Event()
     started = threading.Event()
 
-    def blocked(doc_id, file_path):
+    def blocked(doc_id, file_path, on_progress=None):
         started.set()
         gate.wait(10)
+        return "ready"
 
     monkeypatch.setattr(files_mod, "DATA_DIR", tmp_path)
     monkeypatch.setattr(kb_mod, "get_db", getter)
+    monkeypatch.setattr(worker_mod, "get_db", getter)
+    monkeypatch.setattr(sqlite_mod, "get_db", getter)
     monkeypatch.setattr(worker_mod, "process_document", blocked)
     http = TestClient(_authorized_app())
     try:
@@ -307,15 +340,16 @@ def test_upload_returns_while_worker_is_still_blocked(getter, tmp_path, monkeypa
             files={"file": ("slow.txt", b"pending please", "text/plain")},
         )
         elapsed = time.perf_counter() - started_at
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         assert resp.json()["status"] == "pending"
-        # The worker blocks for up to 10s. The response must not wait for it.
+        # 请求先返回。后台作业可以已经领走，但还堵在处理函数里。
         assert elapsed < 3
         assert started.wait(3)
         status = http.get(f"/api/kb/documents/{resp.json()['doc_id']}/status")
-        assert status.json()["status"] == "pending"
+        assert status.json()["status"] in {"pending", "processing"}
     finally:
         gate.set()
+        shutdown_runner(wait=True)
         shutdown_executor(wait=True)
 
 

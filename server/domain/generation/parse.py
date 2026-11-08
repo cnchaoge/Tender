@@ -235,7 +235,7 @@ def resolve_parse_source(file_path: str | None, document_id: int | None) -> tupl
     raise HTTPException(status_code=404, detail="文件不存在")
 
 
-def parse_bid_file(req: BidParseReq):
+def parse_bid_file(req: BidParseReq, job_id: int | None = None):
     """解析招标文件。项目上的解析会多写一条快照，不覆盖用户改过的项目字段。"""
     path, document_id = resolve_parse_source(req.file_path, req.document_id)
     if req.project_id is not None:
@@ -246,7 +246,7 @@ def parse_bid_file(req: BidParseReq):
     if req.project_id is not None:
         from server.domain.projects.service import record_parse_snapshot
 
-        stored = record_parse_snapshot(req.project_id, document_id, resp.model_dump())
+        stored = record_parse_snapshot(req.project_id, document_id, resp.model_dump(), job_id=job_id)
         resp = resp.model_copy(update={
             "project_name": stored["project_name"] if "project_name" in stored else resp.project_name,
             "deadline": stored["deadline"] if "deadline" in stored else resp.deadline,

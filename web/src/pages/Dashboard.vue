@@ -40,6 +40,8 @@
       </div>
     </div>
 
+    <WorkbenchJobs />
+
     <section class="panel">
       <div class="panel-head">
         <h2>最近项目</h2>
@@ -119,6 +121,7 @@ import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
 import api from "../api"
 import { listProjects } from "../features/projects/api"
+import WorkbenchJobs from "../features/jobs/WorkbenchJobs.vue"
 import { useAuthStore } from "../stores/auth"
 import { useWorkspaceStore } from "../stores/workspace"
 import {

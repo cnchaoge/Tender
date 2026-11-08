@@ -76,8 +76,8 @@ class MockGenerator(BaseGenerator):
 
 class DeepSeekGenerator(BaseGenerator):
     """DeepSeek API（OpenAI 兼容格式）"""
-    def __init__(self):
-        super().__init__(settings.DEEPSEEK_MODEL)
+    def __init__(self, model: str | None = None):
+        super().__init__(model or settings.DEEPSEEK_MODEL)
         from openai import OpenAI
         self.client = OpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
@@ -115,8 +115,8 @@ class DeepSeekGenerator(BaseGenerator):
 
 
 class DashScopeGenerator(BaseGenerator):
-    def __init__(self):
-        super().__init__(settings.DASHSCOPE_MODEL)
+    def __init__(self, model: str | None = None):
+        super().__init__(model or settings.DASHSCOPE_MODEL)
         import dashscope
         dashscope.api_key = settings.DASHSCOPE_API_KEY
 
@@ -137,8 +137,8 @@ class DashScopeGenerator(BaseGenerator):
 
 
 class OpenAIGenerator(BaseGenerator):
-    def __init__(self):
-        super().__init__(settings.OPENAI_MODEL)
+    def __init__(self, model: str | None = None):
+        super().__init__(model or settings.OPENAI_MODEL)
         from openai import OpenAI
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -157,8 +157,8 @@ class OpenAIGenerator(BaseGenerator):
 
 class MiniMaxGenerator(BaseGenerator):
     """MiniMax API（OpenAI 兼容格式）"""
-    def __init__(self):
-        super().__init__(settings.MINIMAX_MODEL)
+    def __init__(self, model: str | None = None):
+        super().__init__(model or settings.MINIMAX_MODEL)
         from openai import OpenAI
         self.client = OpenAI(
             api_key=settings.MINIMAX_API_KEY,
@@ -180,8 +180,8 @@ class MiniMaxGenerator(BaseGenerator):
 
 class OllamaGenerator(BaseGenerator):
     """Ollama 本地 LLM（OpenAI 兼容 API，无需 API Key）"""
-    def __init__(self):
-        super().__init__(settings.OLLAMA_MODEL)
+    def __init__(self, model: str | None = None):
+        super().__init__(model or settings.OLLAMA_MODEL)
         from openai import OpenAI
         self.client = OpenAI(
             api_key="ollama",  # Ollama 不校验 API Key，但 OpenAI SDK 要求非空
@@ -219,7 +219,12 @@ class OllamaGenerator(BaseGenerator):
 
 
 def get_generator():
-    """根据配置返回 LLM 实例"""
+    """根据配置返回 LLM 实例。作业线程里返回该作业快照对应的实例。"""
+    from server.domain.jobs.runtime import pinned_generator
+
+    pinned = pinned_generator()
+    if pinned is not None:
+        return pinned
     provider = settings.LLM_PROVIDER
 
     if provider == "mock":

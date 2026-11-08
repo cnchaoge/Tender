@@ -11,8 +11,6 @@ from pydantic import BaseModel
 
 from server.config import GENERATED_DIR
 from server.deps import get_current_user
-from server.domain.generation.outline import plan_bid as plan_outline
-from server.domain.generation.parse import parse_bid_file as parse_tender_file
 from server.domain.generation.run import generate_bid as run_generate_bid
 from server.domain.generation.run import iter_generate_events
 from server.domain.generation.templates import (
@@ -27,6 +25,7 @@ from server.domain.generation.versions import (
     get_bid_version as get_version_row,
     list_bid_versions as list_version_rows,
     restore_bid_version as restore_version_row,
+    update_draft_version,
 )
 from server.domain.retrieval.analyze import (
     analyze_old_bid as analyze_old_document,
@@ -48,9 +47,7 @@ from server.models import (
     BidGenerateReq,
     BidMatchCheckReq,
     BidParseReq,
-    BidParseResp,
     BidPlanReq,
-    BidPlanResp,
     BidTemplateCreateReq,
     BidTemplateUpdateReq,
 )
@@ -94,16 +91,31 @@ class PlagiarismCheckResp(BaseModel):
     summary: dict
 
 
-@router.post("/parse", response_model=BidParseResp)
-def parse_bid_file(req: BidParseReq):
-    """解析招标文件，提取关键信息"""
-    return parse_tender_file(req)
+@router.post("/parse")
+def parse_bid_file(req: BidParseReq, user: dict = Depends(get_current_user)):
+    """创建 project.parse 作业后立即返回。结果在作业的 result 里。"""
+    from server.domain.jobs.service import enqueue
+
+    return enqueue(
+        "project.parse",
+        payload=req.model_dump(),
+        project_id=req.project_id,
+        document_id=req.document_id,
+        created_by=user.get("id"),
+    )
 
 
-@router.post("/plan", response_model=BidPlanResp)
-def plan_bid(req: BidPlanReq):
-    """生成标书目录大纲（规划阶段）"""
-    return plan_outline(req)
+@router.post("/plan")
+def plan_bid(req: BidPlanReq, user: dict = Depends(get_current_user)):
+    """创建 project.plan 作业后立即返回。目录写在项目上，也在作业结果里。"""
+    from server.domain.jobs.service import enqueue
+
+    return enqueue(
+        "project.plan",
+        payload=req.model_dump(),
+        project_id=req.project_id,
+        created_by=user.get("id"),
+    )
 
 
 @router.post("/generate", response_model=dict)
@@ -224,6 +236,20 @@ def get_bid_version(version_id: int):
 def compare_bid_versions(from_id: int, to_id: int):
     """对比两个版本的差异（简单行对比）"""
     return compare_version_rows(from_id, to_id)
+
+
+class DraftContentReq(BaseModel):
+    bid_content: str
+
+
+@router.put("/versions/{version_id}/content")
+def update_version_content(version_id: int, req: DraftContentReq):
+    """改一份已停止的草稿。完成的版本不从这里改。"""
+    version = get_version_row(version_id)
+    if version.get("status") not in {"draft", "cancelled", "interrupted"}:
+        raise HTTPException(status_code=400, detail="只能修改未完成的草稿")
+    update_draft_version(version_id, bid_content=req.bid_content)
+    return get_version_row(version_id)
 
 
 @router.post("/versions/{version_id}/restore")

@@ -60,7 +60,15 @@
           @update:selected-strategy="selectedStrategy = $event"
           @generate="handleGenerate"
           @download="downloadBidFile"
+          @cancel="cancelGenerate"
         />
+        <div v-if="stoppedDraft && !generating" class="stopped-draft">
+          <p>上次生成已停止，写好的章节还在。可以改完保存，或重新生成。</p>
+          <textarea v-model="stoppedDraft.content" spellcheck="false" />
+          <div>
+            <el-button size="small" @click="saveStoppedDraft">保存草稿</el-button>
+          </div>
+        </div>
         <VersionHistory
           :version-list="versionList"
           :loading-versions="loadingVersions"
@@ -94,7 +102,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from "vue"
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
 import { useKbStore } from "../stores/kb"
@@ -105,7 +113,16 @@ import {
   setProjectMaterials,
   uploadTender,
 } from "../features/projects/api"
-import api, { bid, downloadWithAuth } from "../api"
+import api, { downloadWithAuth } from "../api"
+import {
+  cancelJob,
+  cancelJobKeepalive,
+  createJob,
+  getJob,
+  readJobEvents,
+  readJobLog,
+  waitForJob,
+} from "../features/jobs/client"
 import { marked } from "marked"
 import BidChecklistDialog from "../components/BidChecklistDialog.vue"
 import TenderUpload from "../features/generation/TenderUpload.vue"
@@ -144,6 +161,10 @@ const projectHeadline = computed(() => {
 })
 const selectedMaterials = ref([])
 const generating = ref(false)
+const activeJobId = ref(null)
+const stoppedDraft = ref(null)
+let leaveCancel = null
+let generateOutcome = ""
 const generatedFile = ref(null)
 const generatedContent = ref("")
 const currentVersionId = ref(null)
@@ -267,7 +288,11 @@ function applyProject(project) {
     bidDocId.value = null
   }
   selectedMaterials.value = [...(project?.material_ids || [])]
+  if (Array.isArray(project?.outline) && project.outline.length) {
+    planningChapters.value = project.outline
+  }
   rememberBaseline(result)
+  restoreStoppedDraft(project)
 }
 
 async function ensureProject() {
@@ -428,12 +453,18 @@ async function onFileSelected(file) {
     await kbStore.fetchDocuments()
     bidFile.value = file
     bidDocId.value = uploadResp.data.document_id
-    const resp = await api.post("/api/bid/parse", {
-      document_id: uploadResp.data.document_id,
+    const created = await createJob({
+      type: "project.parse",
       project_id: id,
+      document_id: uploadResp.data.document_id,
+      payload: {
+        document_id: uploadResp.data.document_id,
+        project_id: id,
+      },
     })
-    parseResult.value = resp.data
-    const recommended = resp.data.recommended_materials || []
+    const parsed = await waitForJob(created.id)
+    parseResult.value = parsed
+    const recommended = parsed.recommended_materials || []
     selectedMaterials.value = recommended.map(m => m.id)
     rememberBaseline(resp.data)
     await setProjectMaterials(id, selectedMaterials.value)
@@ -508,12 +539,18 @@ async function handleGenerate() {
   planningChapters.value = []
   planDialogVisible.value = false
   try {
-    const resp = await api.post("/api/bid/plan", {
-      parse_result: parseResult.value,
-      materials: selectedMaterials.value,
-      template_id: selectedTemplateId.value || null
+    const created = await createJob({
+      type: "project.plan",
+      project_id: activeProjectId.value,
+      payload: {
+        parse_result: parseResult.value,
+        materials: selectedMaterials.value,
+        template_id: selectedTemplateId.value || null,
+        project_id: activeProjectId.value,
+      },
     })
-    planningChapters.value = resp.data.chapters || []
+    const planned = await waitForJob(created.id)
+    planningChapters.value = planned.chapters || []
   } catch {
     ElMessage.error("规划章节失败，请重试")
     return
@@ -564,6 +601,175 @@ async function confirmPlanAndGenerate() {
   await doGenerate()
 }
 
+function resetChapterStates() {
+  chapterStates.value = {}
+  for (const ch of planningChapters.value) {
+    chapterStates.value[ch.index] = {
+      name: ch.name,
+      status: "pending",
+      progress: 0,
+    }
+  }
+}
+
+function applyGenerateEvent(data, replay = false) {
+  if (!data || typeof data !== "object") return
+  if (data.job_id) activeJobId.value = data.job_id
+  if (data.progress !== undefined) progress.value = data.progress
+  if (data.message) progressMessage.value = data.message
+  if (data.delta && !replay) {
+    streamingContent.value += data.delta
+    renderedContent.value = marked.parse(streamingContent.value)
+    const preview = document.querySelector(".streaming-html")
+    if (preview) {
+      preview.classList.remove("content-update")
+      void preview.offsetWidth
+      preview.classList.add("content-update")
+    }
+  }
+  if (data.stage === "chapter_start") {
+    genCurrentStep.value = 3
+    const idx = data.chapter_index
+    if (chapterStates.value[idx] !== undefined) {
+      chapterStates.value[idx] = { ...chapterStates.value[idx], status: "generating", progress: 0 }
+    }
+  }
+  if (data.stage === "chapter_progress") {
+    const idx = data.chapter_index
+    if (chapterStates.value[idx] !== undefined) {
+      chapterStates.value[idx] = { ...chapterStates.value[idx], progress: data.progress }
+    }
+  }
+  if (data.stage === "chapter_done") {
+    genCurrentStep.value = 4
+    const idx = data.chapter_index
+    if (chapterStates.value[idx] !== undefined) {
+      chapterStates.value[idx] = { ...chapterStates.value[idx], status: "completed", progress: 100 }
+    }
+  }
+  if (data.stage === "violation_fail") {
+    violationResult.value = data.violation_result
+    generating.value = false
+    if (!replay) {
+      generateOutcome = "violation"
+      ElMessage.error("检测到废标风险，生成已中止！请检查标书内容后重试")
+    }
+  }
+  if (data.stage === "violation_warn") {
+    violationResult.value = data.violation_result
+    genCurrentStep.value = 2
+  }
+  if (data.stage === "cancelled" && !replay) {
+    generateOutcome = "cancelled"
+    stoppedDraft.value = {
+      id: data.version_id || stoppedDraft.value?.id || null,
+      content: streamingContent.value,
+      status: "cancelled",
+      jobId: data.job_id || activeJobId.value,
+    }
+  }
+  if (data.stage === "done" && !replay) {
+    generateOutcome = "done"
+    genCurrentStep.value = 5
+    generatedFile.value = { name: data.filename }
+    reviewResult.value = data.review || null
+    if (data.violation_result) violationResult.value = data.violation_result
+    if (data.plagiarism_result) plagiarismResult.value = data.plagiarism_result
+    if (data.format_result) formatResult.value = data.format_result
+    stoppedDraft.value = null
+    loadVersions()
+    currentVersionId.value = data.version_id
+    if (currentVersionId.value) showChecklistDialog.value = true
+  }
+}
+
+function armLeaveCancel(jobId) {
+  disarmLeaveCancel()
+  activeJobId.value = jobId
+  leaveCancel = () => cancelJobKeepalive(jobId)
+  window.addEventListener("pagehide", leaveCancel)
+}
+
+function disarmLeaveCancel() {
+  if (leaveCancel) window.removeEventListener("pagehide", leaveCancel)
+  leaveCancel = null
+}
+
+async function cancelGenerate() {
+  const jobId = activeJobId.value
+  if (!jobId) return
+  try {
+    await cancelJob(jobId)
+  } catch (e) {
+    if (e.status === 401) return
+    ElMessage.error(e.message || "取消失败")
+  }
+}
+
+async function restoreStoppedDraft(project) {
+  const versions = project?.versions || []
+  const stopped = versions.find((row) => ["draft", "cancelled", "interrupted"].includes(row.status))
+  if (!stopped) {
+    stoppedDraft.value = null
+    return
+  }
+  let text = ""
+  try {
+    const resp = await api.get(`/api/bid/versions/${stopped.id}`)
+    text = resp.data?.bid_content || ""
+  } catch {
+    text = ""
+  }
+  stoppedDraft.value = {
+    id: stopped.id,
+    content: text,
+    status: stopped.status,
+    jobId: stopped.job_id || null,
+  }
+  if (text) {
+    streamingContent.value = text
+    renderedContent.value = marked.parse(text)
+  }
+  if (!stopped.job_id) return
+  try {
+    const job = await getJob(stopped.job_id)
+    if (job.status === "queued" || job.status === "running") {
+      streamingContent.value = ""
+      renderedContent.value = ""
+      resetChapterStates()
+      generating.value = true
+      armLeaveCancel(job.id)
+      const watched = job.id
+      readJobEvents(job.id, { cancelOnDisconnect: true, onEvent: applyGenerateEvent })
+        .catch(() => {})
+        .finally(() => {
+          if (activeJobId.value !== watched) return
+          generating.value = false
+          disarmLeaveCancel()
+        })
+      return
+    }
+    const log = await readJobLog(stopped.job_id)
+    resetChapterStates()
+    for (const event of log.events || []) applyGenerateEvent(event.payload || {}, true)
+  } catch {
+    // 事件日志缺失时仍显示草稿正文
+  }
+}
+
+async function saveStoppedDraft() {
+  const draft = stoppedDraft.value
+  if (!draft?.id) return
+  try {
+    await api.put(`/api/bid/versions/${draft.id}/content`, { bid_content: draft.content || "" })
+    streamingContent.value = draft.content || ""
+    renderedContent.value = marked.parse(streamingContent.value)
+    ElMessage.success("草稿已保存")
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || e.message || "保存草稿失败")
+  }
+}
+
 async function doGenerate() {
   generating.value = true
   reviewResult.value = null
@@ -572,117 +778,41 @@ async function doGenerate() {
   progressMessage.value = ""
   streamingContent.value = ""
   renderedContent.value = ""
-  chapterStates.value = {}
-
-  // Initialize chapter states from planningChapters
-  for (const ch of planningChapters.value) {
-    chapterStates.value[ch.index] = {
-      name: ch.name,
-      status: "pending",
-      progress: 0,
-    }
-  }
+  stoppedDraft.value = null
+  generateOutcome = ""
+  resetChapterStates()
   genCurrentStep.value = 1
 
   try {
-    const response = await bid.openGenerateStream({
-      parse_result: parseResult.value,
-      materials: selectedMaterials.value,
-      chapters: planningChapters.value,
-      strategy: selectedStrategy.value,
+    const job = await createJob({
+      type: "bid.generate",
       project_id: activeProjectId.value,
+      payload: {
+        parse_result: parseResult.value,
+        materials: selectedMaterials.value,
+        chapters: planningChapters.value,
+        strategy: selectedStrategy.value,
+        project_id: activeProjectId.value,
+      },
     })
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}))
-      throw new Error(err.detail || `请求失败 ${response.status}`)
-    }
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split("\n")
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue
-        const raw = line.slice(6).trim()
-        if (!raw) continue
-        try {
-          const data = JSON.parse(raw)
-          if (data.progress !== undefined) progress.value = data.progress
-          if (data.message) progressMessage.value = data.message
-          if (data.delta) {
-            streamingContent.value += data.delta
-            renderedContent.value = marked.parse(streamingContent.value)
-            // Trigger fade-in animation on new content
-            const preview = document.querySelector('.streaming-html')
-            if (preview) {
-              preview.classList.remove('content-update')
-              void preview.offsetWidth // reflow
-              preview.classList.add('content-update')
-            }
-          }
-          // Chapter-level events
-          if (data.stage === "chapter_start") {
-            genCurrentStep.value = 3 // 生成
-            const idx = data.chapter_index
-            if (chapterStates.value[idx] !== undefined) {
-              chapterStates.value[idx] = { ...chapterStates.value[idx], status: "generating", progress: 0 }
-            }
-          }
-          if (data.stage === "chapter_progress") {
-            const idx = data.chapter_index
-            if (chapterStates.value[idx] !== undefined) {
-              chapterStates.value[idx] = { ...chapterStates.value[idx], progress: data.progress }
-            }
-          }
-          if (data.stage === "chapter_done") {
-            genCurrentStep.value = 4 // 质检
-            const idx = data.chapter_index
-            if (chapterStates.value[idx] !== undefined) {
-              chapterStates.value[idx] = { ...chapterStates.value[idx], status: "completed", progress: 100 }
-            }
-          }
-          if (data.stage === "violation_fail") {
-            // 严重废标风险，中断生成
-            violationResult.value = data.violation_result
-            generating.value = false
-            ElMessage.error("检测到废标风险，生成已中止！请检查标书内容后重试")
-            return
-          }
-          if (data.stage === "violation_warn") {
-            violationResult.value = data.violation_result
-            genCurrentStep.value = 2 // 检测
-          }
-          if (data.stage === "done") {
-            genCurrentStep.value = 5 // 完成
-            generatedFile.value = {
-              name: data.filename,
-            }
-            reviewResult.value = data.review || null
-            if (data.violation_result) violationResult.value = data.violation_result
-            if (data.plagiarism_result) plagiarismResult.value = data.plagiarism_result
-            if (data.format_result) formatResult.value = data.format_result
-            // 刷新历史版本列表
-            loadVersions()
-            // 捕获 version_id 并自动弹出检查清单
-            currentVersionId.value = data.version_id
-            if (currentVersionId.value) {
-              showChecklistDialog.value = true
-            }
-          }
-        } catch {}
-      }
-    }
-    if (generatedFile.value) ElMessage.success("标书生成成功")
-    else ElMessage.error("生成失败")
+    armLeaveCancel(job.id)
+    await readJobEvents(job.id, { cancelOnDisconnect: true, onEvent: applyGenerateEvent })
+    if (generateOutcome === "done" || generatedFile.value) ElMessage.success("标书生成成功")
+    else if (generateOutcome === "cancelled" || stoppedDraft.value) ElMessage.info("生成已停止，已保留写好的章节")
+    else if (generateOutcome !== "violation") ElMessage.error("生成失败")
   } catch (e) {
     if (e.status === 401) return
     ElMessage.error(e.response?.data?.detail || e.message || "生成失败")
   } finally {
     generating.value = false
+    disarmLeaveCancel()
   }
 }
+
+onBeforeUnmount(() => {
+  if (generating.value && activeJobId.value) cancelJobKeepalive(activeJobId.value)
+  disarmLeaveCancel()
+})
 </script>
 
 <style src="../features/generation/bid-page.css"></style>

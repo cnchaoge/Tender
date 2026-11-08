@@ -103,8 +103,19 @@ def _store_chunks_and_vectors(doc_id: int, pieces: list[str]) -> None:
     if not pieces:
         return
 
+    from server.domain.jobs.runtime import raise_if_cancelled
+
     collection_name = prepare_embedding_target()
-    vectors = get_embedder().embed(pieces)
+    raise_if_cancelled()
+    batch_size = 32
+    if len(pieces) <= batch_size:
+        vectors = get_embedder().embed(pieces)
+    else:
+        vectors = []
+        for start in range(0, len(pieces), batch_size):
+            raise_if_cancelled()
+            part = pieces[start:start + batch_size]
+            vectors.extend(get_embedder().embed(part))
     if len(vectors) != len(pieces):
         raise RuntimeError(
             f"embedding count {len(vectors)} != chunk count {len(pieces)} for doc_id={doc_id}"
@@ -147,24 +158,39 @@ def _remember_extracted(doc_id: int, relpath: str) -> None:
         conn.close()
 
 
-def process_document(doc_id: int, file_path: str) -> None:
+def process_document(doc_id: int, file_path: str, on_progress=None) -> str:
+    """解析、切块、嵌入。返回 ready / failed / cancelled。
+
+    直接调用时行为与以前一致。作业运行器传入 on_progress，并在批次之间看取消标记。
+    """
+    from server.domain.jobs.store import JobCancelled
+
+    def report(progress: int, message: str) -> None:
+        if on_progress is not None:
+            on_progress(progress, message)
+
     try:
         with write_lock:
             if not _document_exists(doc_id):
-                return
+                return "cancelled"
             _set_status(doc_id, "processing")
+        report(20, "正在解析")
         resolved = str(resolve_stored_path(file_path))
         logger.info("doc_id=%s processing %s", doc_id, resolved)
 
         text = _load_text(doc_id, resolved)
         pieces = chunk_text(text or "")
+        report(40, "正在切块")
 
         with write_lock:
             if not _document_exists(doc_id):
                 discard_partial_artifacts(doc_id)
-                return
+                return "cancelled"
             try:
+                report(70, "正在嵌入")
                 _store_chunks_and_vectors(doc_id, pieces)
+            except JobCancelled:
+                raise
             except IndexIdentityError:
                 logger.exception("doc_id=%s index identity mismatch", doc_id)
                 try:
@@ -173,12 +199,24 @@ def process_document(doc_id: int, file_path: str) -> None:
                     logger.exception("doc_id=%s vector delete after identity mismatch failed", doc_id)
                 if _document_exists(doc_id):
                     _set_status(doc_id, "failed", len(pieces))
-                return
+                return "failed"
             if not _document_exists(doc_id):
                 discard_partial_artifacts(doc_id)
-                return
+                return "cancelled"
             _set_status(doc_id, "ready", len(pieces))
+        report(100, "完成")
         logger.info("doc_id=%s ready chunks=%s", doc_id, len(pieces))
+        return "ready"
+    except JobCancelled:
+        logger.info("doc_id=%s cancelled", doc_id)
+        try:
+            with write_lock:
+                discard_partial_artifacts(doc_id)
+                if _document_exists(doc_id):
+                    _set_status(doc_id, "cancelled", 0)
+        except Exception:
+            logger.exception("doc_id=%s cancel cleanup failed", doc_id)
+        raise
     except Exception:
         logger.exception("doc_id=%s failed", doc_id)
         try:
@@ -186,6 +224,7 @@ def process_document(doc_id: int, file_path: str) -> None:
                 cleanup_partial_document(doc_id)
         except Exception:
             logger.exception("doc_id=%s cleanup failed", doc_id)
+        return "failed"
 
 
 def requeue_incomplete_documents() -> int:
@@ -202,7 +241,7 @@ def requeue_incomplete_documents() -> int:
 
     from server.workers.executor import schedule_document
 
-    queued = 0
+    prepared = []
     for row in rows:
         doc_id = row["id"]
         file_path = str(resolve_stored_path(row["file_path"]))
@@ -213,6 +252,10 @@ def requeue_incomplete_documents() -> int:
         except Exception:
             logger.exception("failed to reset doc_id=%s", doc_id)
             continue
+        prepared.append((doc_id, file_path))
+    # 全部清完再入队，避免运行器先跑起来又被下一轮清掉半成品。
+    queued = 0
+    for doc_id, file_path in prepared:
         schedule_document(doc_id, file_path)
         queued += 1
     if queued:
