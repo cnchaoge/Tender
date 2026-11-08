@@ -159,6 +159,7 @@ class BidPlanReq(BaseModel):
     parse_result: dict  # BidParseResp 结果
     materials: List[int]  # 素材文档 ID 列表
     template_id: Optional[int] = None  # 可选模板 ID
+    project_id: Optional[int] = None
 
 
 class BidPlanResp(BaseModel):

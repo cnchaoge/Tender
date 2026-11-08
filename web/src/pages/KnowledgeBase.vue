@@ -203,6 +203,8 @@ function statusLabel(status) {
     processing: "处理中",
     ready: "就绪",
     failed: "失败",
+    cancelled: "已取消",
+    interrupted: "已中断",
     error: "失败",
   }[status] || status
 }

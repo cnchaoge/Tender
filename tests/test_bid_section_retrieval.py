@@ -264,7 +264,7 @@ def test_generate_paths_share_section_retrieval(monkeypatch):
     from server.domain.generation import materials, outline
     from server.domain.generation import run as generation_run
 
-    for fn in (generation_run.generate_bid, generation_run.iter_generate_events, outline.plan_bid):
+    for fn in (generation_run.generate_bid, generation_run.execute_generate_job, outline.plan_bid):
         source = inspect.getsource(fn)
         assert "_retrieve_materials_text" in source
         assert "query_for_retrieve" not in source

@@ -341,8 +341,17 @@ def _docx_from_markdown(content: str, title: str = "投标标书") -> DocxDocume
 
 
 def _write_bid_docx(content: str, title: str) -> Path:
-    """两条生成接口共用的 Word 落盘。"""
+    """非流式生成仍用随机文件名。作业导出写到 data/generated/{version_id}.docx。"""
     doc = _docx_from_markdown(content, title)
     output_path = GENERATED_DIR / f"bid_{uuid.uuid4().hex[:8]}.docx"
+    doc.save(str(output_path))
+    return output_path
+
+
+def write_version_docx(content: str, title: str, version_id: int) -> Path:
+    """一版标书一个文件，下载时按文件名打开。"""
+    doc = _docx_from_markdown(content, title)
+    output_path = GENERATED_DIR / f"{int(version_id)}.docx"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
     return output_path

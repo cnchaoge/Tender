@@ -46,7 +46,12 @@ class EmbeddingIdentity:
 
 
 def current_embedding_identity() -> EmbeddingIdentity:
-    """读取当前配置。新代码在调用时取设置，不使用导入期快照。"""
+    """读取当前配置。作业线程里改读该作业的 runtime 快照。"""
+    from server.domain.jobs.runtime import pinned_embed_identity
+
+    pinned = pinned_embed_identity()
+    if pinned is not None:
+        return pinned
     settings = get_settings()
     provider = (settings.EMBED_PROVIDER or "").strip().lower()
     if provider == "ollama":
@@ -280,9 +285,12 @@ def _execute_rebuild_locked(build_id: int) -> None:
 
 
 def _embed_into(collection, chunks: list[dict], embedder) -> int:
+    from server.domain.jobs.runtime import raise_if_cancelled
+
     dimension = 0
     batch_size = 32
     for start in range(0, len(chunks), batch_size):
+        raise_if_cancelled()
         batch = chunks[start:start + batch_size]
         vectors = embedder.embed([item["text"] for item in batch])
         if len(vectors) != len(batch):

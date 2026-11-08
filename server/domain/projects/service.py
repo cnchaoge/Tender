@@ -29,7 +29,7 @@ UNSET_NAMES = {"", "未识别到项目名称", "解析失败"}
 
 _PROJECT_COLUMNS = """
     id, name, status, purchaser, deadline, created_by, parse_id,
-    name_edited, deadline_edited, created_at, updated_at
+    name_edited, deadline_edited, outline_json, created_at, updated_at
 """
 
 
@@ -68,9 +68,20 @@ def _project_row(row: sqlite3.Row) -> dict:
         "parse_id": row["parse_id"],
         "name_edited": bool(row["name_edited"]),
         "deadline_edited": bool(row["deadline_edited"]),
+        "outline": _load_outline(row["outline_json"] if "outline_json" in row.keys() else None),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def _load_outline(raw) -> list:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
 
 
 def _touch(cur: sqlite3.Cursor, project_id: int) -> None:
@@ -163,7 +174,8 @@ def get_project(project_id: int) -> dict:
             doc["document_id"] for doc in project["documents"] if doc["role"] == ROLE_TENDER
         ]
         cur.execute(
-            """SELECT id, project_name, strategy, generated_at, file_path, material_ids, project_id
+            """SELECT id, project_name, strategy, generated_at, file_path, material_ids,
+                      project_id, status, job_id
                FROM bid_versions
                WHERE project_id = ?
                ORDER BY generated_at DESC, id DESC
@@ -395,7 +407,29 @@ def _link_tender(cur: sqlite3.Cursor, project_id: int, document_id: int) -> None
     )
 
 
-def record_parse_snapshot(project_id: int, document_id: int | None, result: dict) -> dict:
+def save_outline(project_id: int, chapters: list) -> None:
+    """规划作业把目录写到项目上。"""
+    require_project(project_id)
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE projects
+               SET outline_json = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (json.dumps(chapters or [], ensure_ascii=False), int(project_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_parse_snapshot(
+    project_id: int,
+    document_id: int | None,
+    result: dict,
+    job_id: int | None = None,
+) -> dict:
     """新解析写一条快照。用户改过的项目名和工期不被这次解析覆盖。"""
     project = require_project(project_id)
     stored = dict(result or {})
@@ -421,11 +455,12 @@ def record_parse_snapshot(project_id: int, document_id: int | None, result: dict
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO parse_snapshots (project_id, document_id, result_json, job_id)
-               VALUES (?, ?, ?, NULL)""",
+               VALUES (?, ?, ?, ?)""",
             (
                 project_id,
                 document_id,
                 json.dumps(stored, ensure_ascii=False),
+                job_id,
             ),
         )
         snap_id = int(cur.lastrowid)

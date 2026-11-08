@@ -50,8 +50,14 @@ def get_executor() -> ThreadPoolExecutor:
 
 
 def schedule_document(doc_id: int, file_path: str) -> None:
-    """Queue one document. Returns as soon as the job is accepted."""
-    get_executor().submit(run_document, doc_id, file_path)
+    """Queue one document ingest job. Returns as soon as the job row is accepted."""
+    from server.domain.jobs.service import enqueue
+
+    enqueue(
+        "document.ingest",
+        payload={"document_id": int(doc_id), "file_path": file_path},
+        document_id=int(doc_id),
+    )
 
 
 def run_document(doc_id: int, file_path: str) -> None:
@@ -68,8 +74,10 @@ def run_document(doc_id: int, file_path: str) -> None:
 
 
 def schedule_reindex(build_id: int) -> None:
-    """Queue an index rebuild on the same in-process pool as document ingest."""
-    get_executor().submit(run_reindex, build_id)
+    """Queue an index rebuild as a document.reindex job in this process."""
+    from server.domain.jobs.service import enqueue
+
+    enqueue("document.reindex", payload={"build_id": int(build_id)})
 
 
 def run_reindex(build_id: int) -> None:

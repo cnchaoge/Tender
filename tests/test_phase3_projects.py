@@ -1,6 +1,7 @@
 """阶段 3：项目聚合、全字回填、解析快照、清单勾选和招标文件不进全局问答。"""
 import json
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -162,7 +163,7 @@ def test_backfill_groups_exact_names_and_leaves_near_misses(monkeypatch, tmp_pat
         version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
     finally:
         conn.close()
-    assert int(version) == 3
+    assert int(version) == 4
 
     conn = sqlite_mod.get_db()
     try:
@@ -318,6 +319,25 @@ def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _wait_job(client: TestClient, response, headers: dict) -> dict:
+    """解析和规划现在立刻返回作业。测试等到结果再断言原来的字段。"""
+    assert response.status_code == 200, response.text
+    body = response.json()
+    if body.get("project_name") and "status" not in body:
+        return body
+    job_id = body["id"]
+    last = body
+    for _ in range(100):
+        current = client.get(f"/api/jobs/{job_id}", headers=headers)
+        assert current.status_code == 200, current.text
+        last = current.json()
+        if last["status"] in {"succeeded", "failed", "cancelled", "interrupted"}:
+            assert last["status"] == "succeeded", last
+            return last["result"]
+        time.sleep(0.05)
+    raise AssertionError(last)
+
+
 def test_projects_are_shared_and_parse_snapshot_survives_refresh(api_client, monkeypatch, tmp_path):
     user_a = _add_user("phase3-a")
     user_b = _add_user("phase3-b")
@@ -366,8 +386,8 @@ def test_projects_are_shared_and_parse_snapshot_survives_refresh(api_client, mon
         json={"file_path": uploaded.json()["file_path"], "project_id": project_id},
         headers=_auth(token_a),
     )
-    assert parsed.status_code == 200, parsed.text
-    assert parsed.json()["project_name"] == "华北管道工程"
+    parsed_body = _wait_job(api_client, parsed, _auth(token_a))
+    assert parsed_body["project_name"] == "华北管道工程"
     conn = sqlite_mod.get_db()
     try:
         snap = conn.execute(
@@ -392,9 +412,9 @@ def test_projects_are_shared_and_parse_snapshot_survives_refresh(api_client, mon
         json={"document_id": document_id, "project_id": project_id},
         headers=_auth(token_a),
     )
-    assert again.status_code == 200, again.text
-    assert again.json()["project_name"] == "用户改过的名字"
-    assert again.json()["deadline"] == "60天"
+    again_body = _wait_job(api_client, again, _auth(token_a))
+    assert again_body["project_name"] == "用户改过的名字"
+    assert again_body["deadline"] == "60天"
     assert _count("SELECT COUNT(*) FROM parse_snapshots WHERE project_id = ?", (project_id,)) == 2
 
     conn = sqlite_mod.get_db()
@@ -464,8 +484,8 @@ def test_file_path_parse_without_project_still_works(api_client, monkeypatch, tm
         json={"file_path": str(loose)},
         headers=_auth(token),
     )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["project_name"] == "松散文件"
+    body = _wait_job(api_client, resp, _auth(token))
+    assert body["project_name"] == "松散文件"
     assert _count("SELECT COUNT(*) FROM parse_snapshots") == 0
 
 

@@ -154,6 +154,7 @@ def init_db():
     _ensure_document_columns(cur)
     _ensure_index_builds(cur)
     _ensure_project_schema(cur)
+    _ensure_job_schema(cur)
     from server.domain.documents.files import backfill_document_storage
 
     managed, external = backfill_document_storage(conn)
@@ -334,6 +335,87 @@ def _ensure_project_schema(cur: sqlite3.Cursor) -> None:
         cur.execute("INSERT INTO schema_version (version) VALUES (3)")
     elif int(row["version"]) < 3:
         cur.execute("UPDATE schema_version SET version = 3")
+
+
+def _ensure_job_schema(cur: sqlite3.Cursor) -> None:
+    """阶段 4 加法表。已有库缺表就建，缺列就 ALTER，不换库。"""
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            progress INTEGER NOT NULL DEFAULT 0,
+            message TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            result_json TEXT,
+            cancel_requested INTEGER NOT NULL DEFAULT 0,
+            runtime_json TEXT NOT NULL DEFAULT '{}',
+            idempotency_key TEXT,
+            project_id INTEGER,
+            document_id INTEGER,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            finished_at TIMESTAMP
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (job_id, seq)
+        )
+        """
+    )
+    _ensure_added_columns(
+        cur,
+        "jobs",
+        (
+            ("cancel_requested", "INTEGER NOT NULL DEFAULT 0"),
+            ("runtime_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("idempotency_key", "TEXT"),
+            ("project_id", "INTEGER"),
+            ("document_id", "INTEGER"),
+            ("created_by", "INTEGER"),
+            ("started_at", "TIMESTAMP"),
+            ("finished_at", "TIMESTAMP"),
+        ),
+    )
+    _ensure_added_columns(
+        cur,
+        "bid_versions",
+        (
+            ("parse_id", "INTEGER"),
+            ("status", "TEXT"),
+            ("outline_json", "TEXT"),
+            ("runtime_json", "TEXT"),
+            ("job_id", "INTEGER"),
+        ),
+    )
+    _ensure_added_columns(cur, "projects", (("outline_json", "TEXT"),))
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_type ON jobs(status, type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id, type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_document ON jobs(document_id, type)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_idempotency ON jobs(idempotency_key, status)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_job_events_job_seq ON job_events(job_id, seq)"
+    )
+    cur.execute("SELECT version FROM schema_version LIMIT 1")
+    row = cur.fetchone()
+    if row is None:
+        cur.execute("INSERT INTO schema_version (version) VALUES (4)")
+    elif int(row["version"]) < 4:
+        cur.execute("UPDATE schema_version SET version = 4")
 
 
 def _ensure_content_hash_index(cur: sqlite3.Cursor) -> None:
