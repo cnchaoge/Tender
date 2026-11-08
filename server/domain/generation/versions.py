@@ -1,4 +1,4 @@
-"""标书版本读写。表结构不变，仍按 project_name 文本关联。"""
+"""标书版本读写。新代码按 project_id 关联，project_name 仍留给旧页面和回填。"""
 import difflib
 import json
 from typing import List, Optional
@@ -7,13 +7,22 @@ from fastapi import HTTPException
 
 from server.db.sqlite import get_db
 
-def list_bid_versions(project_name: Optional[str] = None):
-    """获取标书历史版本列表（按时间倒序）"""
+def list_bid_versions(project_name: Optional[str] = None, project_id: Optional[int] = None):
+    """获取标书历史版本列表（按时间倒序）。传 project_id 时不再按名称模糊匹配。"""
     conn = get_db()
     cur = conn.cursor()
-    if project_name:
+    columns = "id, project_name, strategy, generated_at, file_path, material_ids, project_id"
+    if project_id:
         cur.execute(
-            """SELECT id, project_name, strategy, generated_at, file_path, material_ids
+            f"""SELECT {columns}
+               FROM bid_versions
+               WHERE project_id = ?
+               ORDER BY generated_at DESC""",
+            (project_id,),
+        )
+    elif project_name:
+        cur.execute(
+            f"""SELECT {columns}
                FROM bid_versions
                WHERE project_name LIKE ?
                ORDER BY generated_at DESC""",
@@ -21,7 +30,7 @@ def list_bid_versions(project_name: Optional[str] = None):
         )
     else:
         cur.execute(
-            """SELECT id, project_name, strategy, generated_at, file_path, material_ids
+            f"""SELECT {columns}
                FROM bid_versions
                ORDER BY generated_at DESC
                LIMIT 50"""
@@ -37,7 +46,7 @@ def get_bid_version(version_id: int):
     cur = conn.cursor()
     cur.execute(
         """SELECT id, project_name, parse_result_json, bid_content, strategy,
-                  generated_at, file_path, material_ids
+                  generated_at, file_path, material_ids, project_id
            FROM bid_versions WHERE id = ?""",
         (version_id,)
     )
@@ -106,14 +115,21 @@ def _save_bid_version(
     strategy: str,
     file_path: str,
     material_ids: List[int],
+    project_id: Optional[int] = None,
 ):
-    """将一次生成结果写入 bid_versions 表"""
+    """将一次生成结果写入 bid_versions 表。选用的素材 id 抄在版本上。"""
     conn = get_db()
     cur = conn.cursor()
+    linked_project = None
+    if project_id:
+        cur.execute("SELECT id, status FROM projects WHERE id = ?", (project_id,))
+        linked_project = cur.fetchone()
+        if linked_project is None:
+            project_id = None
     cur.execute(
         """INSERT INTO bid_versions
-           (project_name, parse_result_json, bid_content, strategy, file_path, material_ids)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           (project_name, parse_result_json, bid_content, strategy, file_path, material_ids, project_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (
             project_name,
             json.dumps(parse_result, ensure_ascii=False),
@@ -121,8 +137,17 @@ def _save_bid_version(
             strategy,
             file_path,
             json.dumps(material_ids, ensure_ascii=False),
+            project_id,
         )
     )
+    if linked_project is not None and project_id:
+        cur.execute(
+            """UPDATE projects
+               SET updated_at = CURRENT_TIMESTAMP,
+                   status = CASE WHEN status = 'draft' THEN 'active' ELSE status END
+               WHERE id = ?""",
+            (project_id,),
+        )
     conn.commit()
     version_id = cur.lastrowid
     conn.close()

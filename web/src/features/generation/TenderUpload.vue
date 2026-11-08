@@ -8,14 +8,14 @@
   </div>
   <div class="upload-text">点击上传招标文件</div>
   <div class="upload-hint">支持 PDF / DOCX 格式</div>
-  <input
-    ref="fileInputRef"
-    type="file"
-    accept=".pdf,.docx"
-    style="display: none"
-    @change="onFileSelected"
-  />
 </div>
+<input
+  ref="fileInputRef"
+  type="file"
+  accept=".pdf,.docx"
+  style="display: none"
+  @change="onFileSelected"
+/>
 
 <!-- File Loaded -->
 <div class="file-card" v-if="bidFile">
@@ -53,6 +53,7 @@ function triggerUpload() {
 function onFileSelected(e) {
   const file = e.target.files?.[0]
   if (file) emit("file-selected", file)
+  e.target.value = ""
 }
 </script>
 

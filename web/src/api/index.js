@@ -167,11 +167,12 @@ const price = {
 
 // ── 检查清单 ──────────────────────────────────────────────────────────────────
 const checklist = {
-  generate: (bidVersionId, bidContent, parseResult) =>
+  generate: (bidVersionId, bidContent, parseResult, projectId) =>
     http.post("/api/checklist/generate", {
       bid_version_id: bidVersionId,
       bid_content: bidContent,
       parse_result: parseResult,
+      project_id: projectId || null,
     }),
   get: (bidVersionId) => http.get(`/api/checklist/${bidVersionId}`),
   updateItem: (itemId, data) => http.put(`/api/checklist/item/${itemId}`, data),

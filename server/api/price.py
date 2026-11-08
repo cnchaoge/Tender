@@ -54,6 +54,7 @@ class PriceSaveReq(BaseModel):
     suggested_price: float
     calculated_results: str = "{}"
     strategy_scores: str = "[]"
+    project_id: int | None = None
 
 
 class ParseFormulaReq(BaseModel):
@@ -253,15 +254,18 @@ def calculate_price(req: PriceCalcReq):
 
 @router.post("/save")
 def save_analysis(req: PriceSaveReq):
-    """保存报价分析记录"""
+    """保存报价分析记录。能按项目 id 或全字相同的项目名挂上就写入 project_id。"""
+    from server.domain.projects.service import link_price_project
+
+    project_id, project_name = link_price_project(req.project_id, req.project_name)
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
         """INSERT INTO price_analyses
-           (project_name, formula_json, cost_price, suggested_price, calculated_results, strategy_scores)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (req.project_name, req.formula_json, req.cost_price,
-         req.suggested_price, req.calculated_results, req.strategy_scores)
+           (project_name, formula_json, cost_price, suggested_price, calculated_results, strategy_scores, project_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (project_name, req.formula_json, req.cost_price,
+         req.suggested_price, req.calculated_results, req.strategy_scores, project_id)
     )
     conn.commit()
     aid = cur.lastrowid

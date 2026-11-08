@@ -26,7 +26,7 @@
           <router-link
             v-for="item in primaryNav"
             :key="item.path"
-            :to="item.path"
+            :to="navTo(item.path)"
             class="nav-item"
             :class="{ active: isActive(item.path) }"
             @click="mobileMenuOpen = false"
@@ -78,6 +78,7 @@
 import { ref, computed } from "vue"
 import { useRouter, useRoute } from "vue-router"
 import { useAuthStore } from "../stores/auth"
+import { useWorkspaceStore } from "../stores/workspace"
 import BrandMark from "../components/BrandMark.vue"
 import {
   House, EditPen, DataAnalysis, Histogram, Collection, ChatDotRound,
@@ -87,7 +88,15 @@ import {
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const workspace = useWorkspaceStore()
 const mobileMenuOpen = ref(false)
+
+function navTo(path) {
+  if ((path === "/bid" || path === "/price") && workspace.projectId) {
+    return { path, query: { project_id: String(workspace.projectId) } }
+  }
+  return path
+}
 
 const primaryNav = [
   { path: "/dashboard", label: "工作台", icon: House },

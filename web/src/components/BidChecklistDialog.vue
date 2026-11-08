@@ -94,6 +94,7 @@ const props = defineProps({
   bidVersionId: Number,
   bidContent: String,
   parseResult: Object,
+  projectId: Number,
 })
 
 const emit = defineEmits(["update:modelValue", "close"])
@@ -133,7 +134,12 @@ async function loadChecklist() {
   loading.value = true
   try {
     // Generate first
-    await checklist.generate(props.bidVersionId, props.bidContent || "", props.parseResult || {})
+    await checklist.generate(
+      props.bidVersionId,
+      props.bidContent || "",
+      props.parseResult || {},
+      props.projectId || null,
+    )
     // Fetch items
     const resp = await checklist.get(props.bidVersionId)
     items.value = resp.data?.items || []

@@ -6,7 +6,7 @@
         <h1 class="page-title">工作台</h1>
         <p class="page-desc">总览知识库与投标写作的关键数据</p>
       </div>
-      <el-button type="primary" @click="$router.push('/bid')">新建标书</el-button>
+      <el-button type="primary" :loading="creating" @click="createBid">新建标书</el-button>
     </header>
 
     <div class="kpi-grid">
@@ -27,8 +27,8 @@
       <div class="kpi-card">
         <div class="kpi-icon"><el-icon :size="18"><EditPen /></el-icon></div>
         <div class="kpi-body">
-          <div class="kpi-label">历史标书</div>
-          <div class="kpi-num">{{ versionTotal }}</div>
+          <div class="kpi-label">投标项目</div>
+          <div class="kpi-num">{{ projectTotal }}</div>
         </div>
       </div>
       <div v-if="showUserCount" class="kpi-card">
@@ -42,31 +42,58 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>最近标书</h2>
-        <router-link to="/bid" class="panel-link">查看全部</router-link>
+        <h2>最近项目</h2>
       </div>
 
-      <div v-if="versionsLoading" class="panel-empty">正在加载历史标书…</div>
-      <div v-else-if="versionsError" class="panel-empty">暂时无法加载历史标书</div>
-      <div v-else-if="!recentVersions.length" class="panel-empty">
-        还没有生成过标书。从「新建标书」开始。
+      <div v-if="projectsLoading" class="panel-empty">正在加载项目…</div>
+      <div v-else-if="projectsError" class="panel-empty">暂时无法加载项目</div>
+      <div v-else-if="!recentProjects.length" class="panel-empty">
+        还没有投标项目。从「新建标书」开始。
       </div>
       <div v-else class="table-wrap">
         <table class="activity-table">
           <thead>
             <tr>
               <th>项目名称</th>
-              <th>策略</th>
-              <th>生成时间</th>
+              <th>状态</th>
+              <th>工期</th>
+              <th>更新时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in recentVersions" :key="row.id">
-              <td class="name-cell">{{ row.project_name || "未命名项目" }}</td>
-              <td>{{ row.strategy || "—" }}</td>
-              <td class="time-cell">{{ formatTime(row.generated_at) }}</td>
-              <td><router-link to="/bid" class="row-link">查看</router-link></td>
+            <tr v-for="row in recentProjects" :key="row.id">
+              <td class="name-cell">{{ row.name || "未命名项目" }}</td>
+              <td>{{ statusLabel(row.status) }}</td>
+              <td>{{ row.deadline || "—" }}</td>
+              <td class="time-cell">{{ formatTime(row.updated_at || row.created_at) }}</td>
+              <td>
+                <router-link :to="projectLink(row.id)" class="row-link">打开</router-link>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section v-if="unlinkedRows.length" class="panel">
+      <div class="panel-head">
+        <h2>未归入项目</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="activity-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>类型</th>
+              <th>时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in unlinkedRows" :key="row.key">
+              <td class="name-cell">{{ row.name || "未命名" }}</td>
+              <td>{{ row.kind }}</td>
+              <td class="time-cell">{{ formatTime(row.time) }}</td>
             </tr>
           </tbody>
         </table>
@@ -88,18 +115,28 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue"
+import { useRouter } from "vue-router"
+import { ElMessage } from "element-plus"
 import api from "../api"
+import { listProjects } from "../features/projects/api"
 import { useAuthStore } from "../stores/auth"
+import { useWorkspaceStore } from "../stores/workspace"
 import {
   Document, Files, EditPen, User, DataAnalysis, Histogram, Collection, ChatDotRound,
 } from "@element-plus/icons-vue"
 
+const router = useRouter()
 const authStore = useAuthStore()
+const workspace = useWorkspaceStore()
 const stats = ref({ document_count: 0, chunk_count: 0, user_count: 0 })
 const showUserCount = ref(false)
-const versions = ref([])
-const versionsLoading = ref(true)
-const versionsError = ref(false)
+const projects = ref([])
+const unlinked = ref({ versions: [], prices: [] })
+const projectsLoading = ref(true)
+const projectsError = ref(false)
+const creating = ref(false)
+
+const statusText = { draft: "草稿", active: "进行中", archived: "已归档" }
 
 const shortcuts = [
   { path: "/bid", title: "标书生成", desc: "按招标要求编写投标文件", icon: EditPen },
@@ -109,8 +146,44 @@ const shortcuts = [
   { path: "/chat", title: "智能问答", desc: "基于知识库检索并回答", icon: ChatDotRound },
 ]
 
-const recentVersions = computed(() => versions.value.slice(0, 5))
-const versionTotal = computed(() => versions.value.length)
+const recentProjects = computed(() => projects.value.slice(0, 8))
+const projectTotal = computed(() => projects.value.length)
+const unlinkedRows = computed(() => {
+  const versions = (unlinked.value.versions || []).map((row) => ({
+    key: `v-${row.id}`,
+    name: row.project_name,
+    kind: "标书版本",
+    time: row.generated_at,
+  }))
+  const prices = (unlinked.value.prices || []).map((row) => ({
+    key: `p-${row.id}`,
+    name: row.project_name,
+    kind: "报价",
+    time: row.created_at,
+  }))
+  return [...versions, ...prices]
+})
+
+function statusLabel(status) {
+  return statusText[status] || status || "—"
+}
+
+function projectLink(id) {
+  return { path: "/bid", query: { project_id: String(id) } }
+}
+
+async function createBid() {
+  if (creating.value) return
+  creating.value = true
+  try {
+    const project = await workspace.createProject({})
+    router.push(projectLink(project.id))
+  } catch {
+    ElMessage.error("创建项目失败")
+  } finally {
+    creating.value = false
+  }
+}
 
 function formatTime(value) {
   if (!value) return "—"
@@ -121,14 +194,15 @@ function formatTime(value) {
 }
 
 onMounted(async () => {
-  versionsLoading.value = true
+  projectsLoading.value = true
   try {
-    const resp = await api.get("/api/bid/versions")
-    versions.value = resp.data?.versions || []
+    const resp = await listProjects()
+    projects.value = resp.data?.projects || []
+    unlinked.value = resp.data?.unlinked || { versions: [], prices: [] }
   } catch {
-    versionsError.value = true
+    projectsError.value = true
   } finally {
-    versionsLoading.value = false
+    projectsLoading.value = false
   }
 
   if (authStore.user?.role === "admin") {

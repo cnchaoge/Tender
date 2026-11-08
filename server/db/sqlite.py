@@ -153,9 +153,13 @@ def init_db():
     _ensure_user_columns(cur)
     _ensure_document_columns(cur)
     _ensure_index_builds(cur)
+    _ensure_project_schema(cur)
     from server.domain.documents.files import backfill_document_storage
 
     managed, external = backfill_document_storage(conn)
+    from server.domain.projects.backfill import backfill_projects
+
+    project_backfill = backfill_projects(conn)
     _ensure_content_hash_index(cur)
     initial_password_log = bootstrap_admin(conn, DATA_DIR)
 
@@ -164,6 +168,14 @@ def init_db():
     print(f"[DB] SQLite initialized: {DB_PATH}")
     if managed or external:
         print(f"[DB] 文档原件归类：受管 {managed}，外部 {external}")
+    if any(project_backfill.values()):
+        print(
+            "[DB] 项目回填："
+            f"新建 {project_backfill['projects']}，"
+            f"版本 {project_backfill['versions']}，"
+            f"报价 {project_backfill['prices']}，"
+            f"清单 {project_backfill['checklists']}"
+        )
     if initial_password_log:
         print(initial_password_log)
 
@@ -228,6 +240,100 @@ def _ensure_index_builds(cur: sqlite3.Cursor) -> None:
         cur.execute("INSERT INTO schema_version (version) VALUES (2)")
     elif int(row["version"]) < 2:
         cur.execute("UPDATE schema_version SET version = 2")
+
+
+def _ensure_added_columns(cur: sqlite3.Cursor, table: str, additions: tuple[tuple[str, str], ...]) -> None:
+    cur.execute(f"PRAGMA table_info({table})")
+    columns = {row[1] for row in cur.fetchall()}
+    for name, ddl in additions:
+        if name not in columns:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+
+def _ensure_project_schema(cur: sqlite3.Cursor) -> None:
+    """阶段 3 加法表。已有库缺列就 ALTER，旧行的新列为空。"""
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'draft',
+            purchaser TEXT NOT NULL DEFAULT '',
+            deadline TEXT NOT NULL DEFAULT '',
+            created_by INTEGER,
+            parse_id INTEGER,
+            name_edited INTEGER NOT NULL DEFAULT 0,
+            deadline_edited INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            document_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS parse_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            document_id INTEGER,
+            result_json TEXT NOT NULL,
+            job_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    _ensure_added_columns(
+        cur,
+        "projects",
+        (
+            ("name_edited", "INTEGER NOT NULL DEFAULT 0"),
+            ("deadline_edited", "INTEGER NOT NULL DEFAULT 0"),
+        ),
+    )
+    _ensure_added_columns(cur, "bid_versions", (("project_id", "INTEGER"),))
+    _ensure_added_columns(cur, "price_analyses", (("project_id", "INTEGER"),))
+    _ensure_added_columns(
+        cur,
+        "checklist_items",
+        (
+            ("project_id", "INTEGER"),
+            ("source_version_id", "INTEGER"),
+        ),
+    )
+    cur.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_documents_role
+        ON project_documents(project_id, document_id, role)
+        """
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bid_versions_project_id ON bid_versions(project_id)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_price_analyses_project_id ON price_analyses(project_id)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_checklist_items_project_id ON checklist_items(project_id)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_parse_snapshots_project_id ON parse_snapshots(project_id)"
+    )
+    cur.execute("SELECT version FROM schema_version LIMIT 1")
+    row = cur.fetchone()
+    if row is None:
+        cur.execute("INSERT INTO schema_version (version) VALUES (3)")
+    elif int(row["version"]) < 3:
+        cur.execute("UPDATE schema_version SET version = 3")
 
 
 def _ensure_content_hash_index(cur: sqlite3.Cursor) -> None:
