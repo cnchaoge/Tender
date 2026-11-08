@@ -156,7 +156,7 @@ def test_pipeline_uses_generate_or_stream_and_retries_once(monkeypatch):
         assert parse_result["project_name"] == PARSE["project_name"]
         return reviews.pop(0)
 
-    monkeypatch.setattr("server.core.bidgen.pipeline.review_bid", fake_review)
+    monkeypatch.setattr("server.domain.generation.draft.review_bid", fake_review)
     gen = FakeGenerator()
     pipe = BidDraftPipeline(gen, PARSE, MATERIALS, "技术优先型")
     assert list(pipe.iter_deltas(stream=False)) == ["# 投标函\n感谢贵方。"]
@@ -179,10 +179,20 @@ def test_pipeline_uses_generate_or_stream_and_retries_once(monkeypatch):
 
 
 def test_routes_delegate_prompt_building():
+    """路由只转发。提示词和重写仍在领域模块，两条路径共用 BidDraftPipeline。"""
     from server.api import bid
+    from server.domain.generation import run as generation_run
 
-    for name in ("generate_bid", "generate_bid_stream"):
-        source = inspect.getsource(getattr(bid, name))
+    batch_route = inspect.getsource(bid.generate_bid)
+    stream_route = inspect.getsource(bid.generate_bid_stream)
+    assert "run_generate_bid" in batch_route
+    assert "iter_generate_events" in stream_route
+    for source in (batch_route, stream_route):
+        assert "根据以下招标文件要求" not in source
+        assert "_get_strategy_guidance" not in source
+
+    for fn in (generation_run.generate_bid, generation_run.iter_generate_events):
+        source = inspect.getsource(fn)
         assert "BidDraftPipeline" in source
         assert "_retrieve_materials_text" in source
         assert "根据以下招标文件要求" not in source
@@ -232,7 +242,9 @@ def _parse_sse(raw: bytes) -> list[dict]:
 
 def _install(monkeypatch, gen, reviews, violation=None):
     from server.api import bid
-    from server.core.bidgen import pipeline
+    from server.domain.export import docx
+    from server.domain.generation import draft
+    from server.domain.generation import run as generation_run
 
     violation = violation or _Violation()
     saved = {}
@@ -249,14 +261,14 @@ def _install(monkeypatch, gen, reviews, violation=None):
         saved.update(kwargs)
         return 11
 
-    monkeypatch.setattr(bid, "get_generator", lambda: gen)
-    monkeypatch.setattr(bid, "_retrieve_materials_text", fake_retrieve)
-    monkeypatch.setattr(bid, "_docx_from_markdown", lambda content, title="投标标书": _Doc())
-    monkeypatch.setattr(bid, "_check_format_compliance", lambda content, parse: {"passed": True, "score": 80, "warnings": []})
-    monkeypatch.setattr(bid, "get_violation_checker", lambda: violation)
-    monkeypatch.setattr(bid, "get_plagiarism_checker", lambda: _Plagiarism())
-    monkeypatch.setattr(bid, "_save_bid_version", fake_save)
-    monkeypatch.setattr(pipeline, "review_bid", fake_review)
+    monkeypatch.setattr(generation_run, "get_generator", lambda: gen)
+    monkeypatch.setattr(generation_run, "_retrieve_materials_text", fake_retrieve)
+    monkeypatch.setattr(docx, "_docx_from_markdown", lambda content, title="投标标书": _Doc())
+    monkeypatch.setattr(generation_run, "_check_format_compliance", lambda content, parse: {"passed": True, "score": 80, "warnings": []})
+    monkeypatch.setattr(generation_run, "get_violation_checker", lambda: violation)
+    monkeypatch.setattr(generation_run, "get_plagiarism_checker", lambda: _Plagiarism())
+    monkeypatch.setattr(generation_run, "_save_bid_version", fake_save)
+    monkeypatch.setattr(draft, "review_bid", fake_review)
     return bid, saved, retrievals, violation
 
 
