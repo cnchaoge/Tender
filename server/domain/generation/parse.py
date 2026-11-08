@@ -1,13 +1,18 @@
 """招标文件解析与字段补全。
 
-路由只转发。仍接受服务端路径 `file_path`；按文档 id 解析是阶段 3 的事。
+带 `file_path` 的旧接口保留到阶段 5。内部先找到受管原件再解析。
+带 `document_id` 和 `project_id` 时，解析结果写入 ParseSnapshot。
 """
+import os
 import re
+from pathlib import Path
 
 from fastapi import HTTPException
 
 from server.core.generator.llm import get_generator
 from server.core.retriever.retriever import retrieve
+from server.db.sqlite import get_db
+from server.domain.documents.files import relative_to_data, resolve_stored_path
 from server.models import BidParseReq, BidParseResp
 
 def _json_clean(raw: str) -> str:
@@ -156,17 +161,109 @@ def _health_check(text: str, file_path: str) -> dict:
     return {"status": status, "checks": checks}
 
 
+def _find_document_by_path(file_path: str):
+    """file_path 能对上受管副本时返回那一行，解析读的是这份副本。"""
+    raw = Path(file_path)
+    keys = {file_path}
+    if raw.is_absolute():
+        try:
+            keys.add(relative_to_data(raw))
+        except Exception:
+            pass
+    else:
+        keys.add(str(resolve_stored_path(file_path)))
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        for key in keys:
+            cur.execute(
+                "SELECT * FROM documents WHERE file_path = ? ORDER BY id LIMIT 1",
+                (key,),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                return row
+        if not raw.exists():
+            return None
+        try:
+            resolved = raw.resolve()
+        except OSError:
+            return None
+        cur.execute("SELECT id, file_path FROM documents")
+        for item in cur.fetchall():
+            stored = resolve_stored_path(item["file_path"])
+            try:
+                if stored.is_file() and stored.resolve() == resolved:
+                    cur.execute("SELECT * FROM documents WHERE id = ?", (item["id"],))
+                    return cur.fetchone()
+            except OSError:
+                continue
+        return None
+    finally:
+        conn.close()
+
+
+def resolve_parse_source(file_path: str | None, document_id: int | None) -> tuple[str, int | None]:
+    """返回 (要解析的路径, 文档 id)。文档 id 优先；旧路径先对受管文件。"""
+    if document_id is not None:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM documents WHERE id = ?", (document_id,))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        path = resolve_stored_path(row["file_path"])
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        return str(path), int(document_id)
+
+    if not file_path:
+        raise HTTPException(status_code=400, detail="需要 file_path 或 document_id")
+
+    row = _find_document_by_path(file_path)
+    if row is not None:
+        managed = resolve_stored_path(row["file_path"])
+        if managed.is_file():
+            return str(managed), int(row["id"])
+        if os.path.exists(file_path):
+            return file_path, int(row["id"])
+    if os.path.exists(file_path):
+        return file_path, None
+    raise HTTPException(status_code=404, detail="文件不存在")
+
+
 def parse_bid_file(req: BidParseReq):
-    """解析招标文件，提取关键信息"""
-    import os
-    if not os.path.exists(req.file_path):
+    """解析招标文件。项目上的解析会多写一条快照，不覆盖用户改过的项目字段。"""
+    path, document_id = resolve_parse_source(req.file_path, req.document_id)
+    if req.project_id is not None:
+        from server.domain.projects.service import require_project
+
+        require_project(req.project_id)
+    resp = _parse_managed_file(path)
+    if req.project_id is not None:
+        from server.domain.projects.service import record_parse_snapshot
+
+        stored = record_parse_snapshot(req.project_id, document_id, resp.model_dump())
+        resp = resp.model_copy(update={
+            "project_name": stored["project_name"] if "project_name" in stored else resp.project_name,
+            "deadline": stored["deadline"] if "deadline" in stored else resp.deadline,
+        })
+    return resp
+
+
+def _parse_managed_file(file_path: str):
+    """解析已经落到磁盘上的招标文件。"""
+    if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
 
     from server.core.parser.document import parse_file
-    text, _ = parse_file(req.file_path)
+    text, _ = parse_file(file_path)
 
     # 招标文件体检（轻量版）
-    health = _health_check(text, req.file_path)
+    health = _health_check(text, file_path)
 
     generator = get_generator()
     prompt = f"""请从以下招标文件中提取关键信息，以JSON格式返回：

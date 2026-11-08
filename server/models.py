@@ -109,7 +109,9 @@ class BidTemplateUpdateReq(BaseModel):
 
 # ============ 标书 ============
 class BidParseReq(BaseModel):
-    file_path: str  # 已在服务端的文件路径
+    file_path: Optional[str] = None  # 旧接口。阶段 5 之前仍接受，内部先找到受管文件
+    document_id: Optional[int] = None  # 项目招标文件
+    project_id: Optional[int] = None
 
 
 class ScoringItem(BaseModel):
@@ -145,6 +147,7 @@ class BidGenerateReq(BaseModel):
     materials: List[int]  # 素材文档 ID 列表
     chapters: Optional[List[dict]] = None  # plan 阶段返回的章节列表 [{index, name, description, status}]
     strategy: str = "综合均衡型"  # 投标策略: 技术优先型 | 成本控制型 | 综合均衡型
+    project_id: Optional[int] = None
 
 
 class BidMatchCheckReq(BaseModel):

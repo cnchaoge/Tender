@@ -21,7 +21,7 @@ import threading
 
 from server.db.sqlite import init_db
 from server.db.violation_db import init_violation_db
-from server.api import auth, kb, rag, bid, admin, price as price_api, checklist
+from server.api import auth, kb, rag, bid, admin, price as price_api, checklist, projects
 from server.core.glossary import init_builtin_glossary
 from server.domain.generation.templates import _init_builtin_templates
 
@@ -86,6 +86,7 @@ app.include_router(bid.router)
 app.include_router(admin.router)
 app.include_router(price_api.router)
 app.include_router(checklist.router)
+app.include_router(projects.router)
 
 # 静态文件（前端dist）。assets 目录在未构建时可能不存在，不能因此让应用无法启动。
 WEB_DIST = _get_resource_path("web/dist")

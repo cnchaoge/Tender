@@ -206,9 +206,12 @@ def match_check(req: BidMatchCheckReq):
 
 
 @router.get("/versions")
-def list_bid_versions(project_name: Optional[str] = None):
+def list_bid_versions(
+    project_name: Optional[str] = None,
+    project_id: Optional[int] = None,
+):
     """获取标书历史版本列表（按时间倒序）"""
-    return list_version_rows(project_name)
+    return list_version_rows(project_name, project_id)
 
 
 @router.get("/versions/{version_id}")

@@ -29,6 +29,7 @@ class ChecklistGenerateReq(BaseModel):
     bid_version_id: int
     bid_content: str = ""
     parse_result: Optional[dict] = None
+    project_id: Optional[int] = None
 
 
 # ── 清单自动生成规则 ───────────────────────────────────────────────────────
@@ -161,21 +162,123 @@ def _category_sort(cat: str) -> int:
 # ── API 端点 ───────────────────────────────────────────────────────────────
 
 
+def _version_project_id(cur, version_id: int) -> int | None:
+    if not version_id:
+        return None
+    cur.execute("SELECT project_id FROM bid_versions WHERE id = ?", (version_id,))
+    row = cur.fetchone()
+    if row is None or not row["project_id"]:
+        return None
+    return int(row["project_id"])
+
+
+_CHECKLIST_COLUMNS = """id, bid_version_id, project_id, source_version_id, category, item,
+    status, remark, source, sort_order, created_at"""
+
+
+def _load_checklist_items(cur, bid_version_id: int) -> list[dict]:
+    """按版本读取。版本属于项目时，把该项目上的清单一起返回，旧 bid_version_id 仍可命中。"""
+    project_id = _version_project_id(cur, bid_version_id)
+    if project_id:
+        cur.execute(
+            f"""SELECT {_CHECKLIST_COLUMNS}
+               FROM checklist_items
+               WHERE project_id = ? OR bid_version_id = ? OR source_version_id = ?
+               ORDER BY sort_order ASC, id ASC""",
+            (project_id, bid_version_id, bid_version_id),
+        )
+    else:
+        cur.execute(
+            f"""SELECT {_CHECKLIST_COLUMNS}
+               FROM checklist_items
+               WHERE bid_version_id = ?
+               ORDER BY sort_order ASC, id ASC""",
+            (bid_version_id,),
+        )
+    seen = set()
+    items = []
+    for row in cur.fetchall():
+        if row["id"] in seen:
+            continue
+        seen.add(row["id"])
+        items.append(dict(row))
+    return items
+
+
+def _generate_project_checklist(cur, project_id: int, vid: int, items: list) -> int:
+    """清单挂在项目上。已勾选或手写的准备状态留下，只替换仍是待准备的自动项。"""
+    cur.execute(
+        """SELECT id, category, item, status, remark, source, bid_version_id, source_version_id
+           FROM checklist_items WHERE project_id = ?""",
+        (project_id,),
+    )
+    for row in cur.fetchall():
+        sticky = (
+            row["source"] == "manual"
+            or row["status"] != "待准备"
+            or (row["remark"] or "").strip()
+        )
+        if sticky and not row["source_version_id"]:
+            cur.execute(
+                "UPDATE checklist_items SET source_version_id = ? WHERE id = ?",
+                (row["bid_version_id"] or vid, row["id"]),
+            )
+    cur.execute(
+        """DELETE FROM checklist_items
+           WHERE project_id = ? AND source = 'auto' AND status = '待准备'
+             AND TRIM(COALESCE(remark, '')) = ''""",
+        (project_id,),
+    )
+    cur.execute(
+        "SELECT category, item FROM checklist_items WHERE project_id = ?",
+        (project_id,),
+    )
+    present = {(row["category"], row["item"]) for row in cur.fetchall()}
+    inserted = 0
+    for item in items:
+        key = (item["category"], item["item"])
+        if key in present:
+            continue
+        present.add(key)
+        cur.execute(
+            """INSERT INTO checklist_items
+               (bid_version_id, project_id, source_version_id, category, item,
+                status, remark, source, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                vid, project_id, vid, item["category"], item["item"],
+                item["status"], item["remark"], item["source"], item["sort_order"],
+            ),
+        )
+        inserted += 1
+    cur.execute("SELECT COUNT(*) AS n FROM checklist_items WHERE project_id = ?", (project_id,))
+    return int(cur.fetchone()["n"])
+
+
 @router.post("/generate")
 def generate_checklist(req: ChecklistGenerateReq):
-    """根据标书内容自动生成检查清单"""
+    """根据标书内容自动生成检查清单。
+
+    没有项目时仍按版本整表替换自动项。挂在项目上时，再生成一版不清空已勾选的准备状态。
+    """
     items = _extract_items_from_bid(req.bid_content, req.parse_result)
     vid = req.bid_version_id
 
-    # 删除该版本的旧 auto 项
     conn = get_db()
     cur = conn.cursor()
+    project_id = _version_project_id(cur, vid) or (req.project_id or None)
+    if project_id:
+        total = _generate_project_checklist(cur, project_id, vid, items)
+        conn.commit()
+        conn.close()
+        return {"count": total, "message": f"已生成 {total} 项检查清单"}
+
+    # 旧路径：没有项目的版本仍按该版本替换自动项。
     cur.execute(
         "DELETE FROM checklist_items WHERE bid_version_id = ? AND source = 'auto'",
         (vid,)
     )
 
-    # 插入新项
     for item in items:
         cur.execute(
             """INSERT INTO checklist_items
@@ -200,15 +303,9 @@ def get_checklist(bid_version_id: int):
     """获取指定标书版本的检查清单"""
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(
-        """SELECT id, bid_version_id, category, item, status, remark, source, sort_order, created_at
-           FROM checklist_items WHERE bid_version_id = ?
-           ORDER BY sort_order ASC, id ASC""",
-        (bid_version_id,)
-    )
-    rows = cur.fetchall()
+    items = _load_checklist_items(cur, bid_version_id)
     conn.close()
-    return {"items": [dict(r) for r in rows]}
+    return {"items": items}
 
 
 @router.put("/item/{item_id}")
@@ -242,12 +339,13 @@ def add_item(req: ChecklistItemCreate):
     """手动添加检查项"""
     conn = get_db()
     cur = conn.cursor()
+    project_id = _version_project_id(cur, req.bid_version_id)
     cur.execute(
         """INSERT INTO checklist_items
-           (bid_version_id, category, item, status, remark, source, sort_order)
-           VALUES (?, ?, ?, ?, ?, 'manual', ?)""",
-        (req.bid_version_id, req.category, req.item, req.status, req.remark,
-         _category_sort(req.category))
+           (bid_version_id, project_id, source_version_id, category, item, status, remark, source, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?)""",
+        (req.bid_version_id, project_id, req.bid_version_id, req.category, req.item,
+         req.status, req.remark, _category_sort(req.category))
     )
     conn.commit()
     item_id = cur.lastrowid
@@ -274,12 +372,7 @@ def export_checklist(bid_version_id: int):
     """获取导出数据（前端打印成 PDF）"""
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(
-        """SELECT category, item, status, remark FROM checklist_items
-           WHERE bid_version_id = ? ORDER BY sort_order ASC, id ASC""",
-        (bid_version_id,)
-    )
-    rows = cur.fetchall()
+    rows = _load_checklist_items(cur, bid_version_id)
     conn.close()
 
     if not rows:

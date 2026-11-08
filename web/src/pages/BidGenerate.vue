@@ -4,7 +4,7 @@
     <div class="page-header">
       <div class="eyebrow">投标工具</div>
       <h1 class="page-title">标书生成</h1>
-      <p class="page-desc">上传招标文件，系统自动解析项目信息并生成完整投标标书</p>
+      <p class="page-desc">{{ projectHeadline }}</p>
     </div>
 
     <div class="bid-grid">
@@ -88,14 +88,23 @@
       :bid-version-id="currentVersionId"
       :bid-content="streamingContent"
       :parse-result="parseResult"
+      :project-id="activeProjectId"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onMounted, watch, nextTick } from "vue"
+import { useRoute, useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
 import { useKbStore } from "../stores/kb"
+import { useWorkspaceStore } from "../stores/workspace"
+import {
+  queryProjectId,
+  saveProjectSnapshot,
+  setProjectMaterials,
+  uploadTender,
+} from "../features/projects/api"
 import api, { bid, downloadWithAuth } from "../api"
 import { marked } from "marked"
 import BidChecklistDialog from "../components/BidChecklistDialog.vue"
@@ -110,15 +119,29 @@ import VersionHistory from "../features/generation/VersionHistory.vue"
 // Configure marked for security (no async)
 marked.setOptions({ breaks: true, gfm: true })
 
-onMounted(() => {
+const route = useRoute()
+const router = useRouter()
+const workspace = useWorkspaceStore()
+const kbStore = useKbStore()
+const activeProjectId = computed(() => queryProjectId(route.query) || workspace.projectId)
+const baseline = ref({ project_name: "", deadline: "" })
+let persistReady = false
+let persistTimer = null
+
+onMounted(async () => {
+  await ensureProject()
   loadTemplates()
   loadVersions()
+  kbStore.fetchDocuments().catch(() => {})
 })
-
-const kbStore = useKbStore()
 const bidFile = ref(null)
 const bidDocId = ref(null)  // 上传的招标文件 doc_id，不参与素材选择
 const parseResult = ref(null)
+const projectHeadline = computed(() => {
+  const name = parseResult.value?.project_name
+  if (name && name !== "解析失败" && name !== "未识别到项目名称") return name
+  return "上传招标文件，系统自动解析项目信息并生成完整投标标书"
+})
 const selectedMaterials = ref([])
 const generating = ref(false)
 const generatedFile = ref(null)
@@ -219,14 +242,99 @@ const availableMaterials = computed(() => {
   return result
 })
 
+function rememberBaseline(result) {
+  baseline.value = {
+    project_name: result?.project_name || "",
+    deadline: result?.deadline || "",
+  }
+}
+
+function applyProject(project) {
+  const result = project?.parse?.result || null
+  parseResult.value = result
+  const docs = project?.documents || []
+  const tenderId = project?.parse?.document_id
+  const tender = docs.find((doc) => doc.role === "tender" && doc.document_id === tenderId)
+    || docs.find((doc) => doc.role === "tender")
+  if (tender) {
+    bidFile.value = { name: tender.filename || "招标文件" }
+    bidDocId.value = tender.document_id
+  } else if (result) {
+    bidFile.value = { name: "招标文件" }
+    bidDocId.value = tenderId || null
+  } else {
+    bidFile.value = null
+    bidDocId.value = null
+  }
+  selectedMaterials.value = [...(project?.material_ids || [])]
+  rememberBaseline(result)
+}
+
+async function ensureProject() {
+  persistReady = false
+  let id = queryProjectId(route.query)
+  if (!id && workspace.projectId) {
+    id = workspace.projectId
+    await router.replace({ path: "/bid", query: { project_id: String(id) } })
+  }
+  if (!id) {
+    const created = await workspace.createProject({})
+    id = created.id
+    await router.replace({ path: "/bid", query: { project_id: String(id) } })
+    applyProject(created)
+    await nextTick()
+    persistReady = true
+    return
+  }
+  try {
+    const project = await workspace.loadProject(id)
+    applyProject(project)
+  } catch {
+    workspace.clear()
+    const created = await workspace.createProject({})
+    await router.replace({ path: "/bid", query: { project_id: String(created.id) } })
+    applyProject(created)
+  }
+  await nextTick()
+  persistReady = true
+}
+
+function schedulePersist() {
+  if (!persistReady || !activeProjectId.value) return
+  clearTimeout(persistTimer)
+  persistTimer = setTimeout(persistProjectState, 400)
+}
+
+async function persistProjectState() {
+  const id = activeProjectId.value
+  if (!id) return
+  try {
+    if (parseResult.value) {
+      const nameEdited = (parseResult.value.project_name || "") !== baseline.value.project_name
+      const deadlineEdited = (parseResult.value.deadline || "") !== baseline.value.deadline
+      await saveProjectSnapshot(id, {
+        result: parseResult.value,
+        name_edited: nameEdited,
+        deadline_edited: deadlineEdited,
+      })
+      if (nameEdited || deadlineEdited) rememberBaseline(parseResult.value)
+    }
+    await setProjectMaterials(id, selectedMaterials.value)
+  } catch {
+    // 自动保存失败时保留页面上的内容，下次编辑再试。
+  }
+}
+
+watch(parseResult, schedulePersist, { deep: true })
+watch(selectedMaterials, schedulePersist, { deep: true })
+
 async function loadVersions() {
   loadingVersions.value = true
   try {
-    const resp = await api.get("/api/bid/versions", {
-      params: parseResult.value?.project_name
-        ? { project_name: parseResult.value.project_name }
-        : {}
-    })
+    const params = activeProjectId.value
+      ? { project_id: activeProjectId.value }
+      : (parseResult.value?.project_name ? { project_name: parseResult.value.project_name } : {})
+    const resp = await api.get("/api/bid/versions", { params })
     versionList.value = resp.data.versions || []
   } catch {
     // 静默失败
@@ -307,22 +415,35 @@ async function downloadBidFile(filename) {
 
 async function onFileSelected(file) {
   if (!file) return
+  const id = activeProjectId.value
+  if (!id) {
+    ElMessage.error("项目尚未就绪")
+    return
+  }
+  persistReady = false
   const formData = new FormData()
   formData.append("file", file)
-  const uploadResp = await api.post("/api/kb/documents", formData, {
-    headers: { "Content-Type": "multipart/form-data" }
-  })
-  await kbStore.fetchDocuments()
-  bidFile.value = file
-  bidDocId.value = uploadResp.data.doc_id
   try {
-    const resp = await api.post("/api/bid/parse", { file_path: uploadResp.data.file_path })
+    const uploadResp = await uploadTender(id, formData)
+    await kbStore.fetchDocuments()
+    bidFile.value = file
+    bidDocId.value = uploadResp.data.document_id
+    const resp = await api.post("/api/bid/parse", {
+      document_id: uploadResp.data.document_id,
+      project_id: id,
+    })
     parseResult.value = resp.data
     const recommended = resp.data.recommended_materials || []
     selectedMaterials.value = recommended.map(m => m.id)
+    rememberBaseline(resp.data)
+    await setProjectMaterials(id, selectedMaterials.value)
     ElMessage.success("招标文件解析完成" + (recommended.length ? `，已自动关联 ${recommended.length} 个相关素材` : ""))
+    loadVersions()
   } catch {
     ElMessage.error("解析失败")
+  } finally {
+    await nextTick()
+    persistReady = true
   }
 }
 
@@ -469,6 +590,7 @@ async function doGenerate() {
       materials: selectedMaterials.value,
       chapters: planningChapters.value,
       strategy: selectedStrategy.value,
+      project_id: activeProjectId.value,
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))

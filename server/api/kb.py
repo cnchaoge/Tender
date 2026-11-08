@@ -137,7 +137,11 @@ def _store_managed_path(doc_id: int, path: Path, file_size: int) -> None:
 def list_documents():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM documents ORDER BY created_at DESC")
+    cur.execute(
+        """SELECT * FROM documents
+           WHERE COALESCE(scope, 'library') != 'project'
+           ORDER BY created_at DESC"""
+    )
     rows = cur.fetchall()
     conn.close()
     return [Document(**dict(r)) for r in rows]

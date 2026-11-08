@@ -11,7 +11,7 @@ from server.core.generator.llm import get_generator
 from server.core.reviewer import _check_format_compliance
 from server.domain.export.docx import _write_bid_docx
 from server.domain.generation.draft import BidDraftPipeline, chapter_lookup, match_heading_chapter
-from server.domain.generation.materials import _retrieve_materials_text
+from server.domain.generation.materials import _retrieve_materials_text, generation_material_ids
 from server.domain.generation.versions import _save_bid_version
 from server.models import BidGenerateReq
 from server.tools.plagiarism_checker import get_plagiarism_checker
@@ -26,9 +26,11 @@ def generate_bid(req: BidGenerateReq):
     """根据招标文件生成标书（带 AI 质检，非流式）。正文生成走 BidDraftPipeline。"""
     generator = get_generator()
 
-    # 按章节检索素材：查询包含章节标题/用途，以及与该章相关的技术要求和评分项。
+    # 按章节检索素材。该项目的招标文件切片一并纳入，不进入全局问答。
     materials_text = _retrieve_materials_text(
-        req.parse_result, req.materials, req.chapters
+        req.parse_result,
+        generation_material_ids(req.materials, req.project_id),
+        req.chapters,
     )
     pipe = BidDraftPipeline(generator, req.parse_result, materials_text, req.strategy)
     for _delta in pipe.iter_deltas(stream=False):
@@ -56,7 +58,9 @@ async def iter_generate_events(req: BidGenerateReq):
 
     # 与非流式生成共用按章节检索，避免流式路径仍只用项目名和工期。
     materials_text = _retrieve_materials_text(
-        req.parse_result, req.materials, req.chapters
+        req.parse_result,
+        generation_material_ids(req.materials, req.project_id),
+        req.chapters,
     )
     pipe = BidDraftPipeline(generator, req.parse_result, materials_text, req.strategy)
     chapters = req.chapters or []
@@ -176,6 +180,7 @@ async def iter_generate_events(req: BidGenerateReq):
         strategy=req.strategy or "",
         file_path=str(output_path),
         material_ids=req.materials or [],
+        project_id=req.project_id,
     )
 
     # 阶段6：完成

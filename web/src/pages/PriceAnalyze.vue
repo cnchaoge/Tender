@@ -5,6 +5,7 @@
       <div class="header-eyebrow">投标报价</div>
       <h1 class="header-title">报价分析计算器</h1>
       <p class="header-desc">根据招标文件的评分公式，输入成本价后自动计算最优投标报价。</p>
+      <p v-if="linkedProjectId" class="header-desc">当前项目：{{ linkedProjectName || "未命名项目" }}。评分办法来自该项目已保存的解析结果。</p>
     </div>
 
     <div class="page-body">
@@ -240,12 +241,18 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from "vue"
-import { useRouter } from "vue-router"
+import { useRouter, useRoute } from "vue-router"
 import { ElMessage, ElMessageBox } from "element-plus"
 import { Check, Plus, Loading } from "@element-plus/icons-vue"
 import { bid, price } from "../api"
+import { getProject, queryProjectId } from "../features/projects/api"
+import { useWorkspaceStore } from "../stores/workspace"
 
 const router = useRouter()
+const route = useRoute()
+const workspace = useWorkspaceStore()
+const linkedProjectId = ref(null)
+const linkedProjectName = ref("")
 
 // ── State ────────────────────────────────────────────────────────────────
 const formula = reactive({
@@ -295,6 +302,23 @@ onMounted(async () => {
     templates.value = resp.data.templates || []
   } catch (e) {
     // ignore
+  }
+  const id = queryProjectId(route.query) || workspace.projectId
+  if (id) {
+    try {
+      const resp = await getProject(id)
+      const project = resp.data
+      linkedProjectId.value = project.id
+      linkedProjectName.value = project.name || ""
+      workspace.remember(project.id)
+      const scoring = project.parse?.result?.scoring
+      const rawText = project.parse?.result?.raw_text || ""
+      if (scoring && typeof scoring === "object" && Object.keys(scoring).length) {
+        await loadFromParseResult(scoring, rawText)
+      }
+    } catch (e) {
+      // 项目读不到时仍可手工报价
+    }
   }
   loadHistory()
 })
@@ -351,7 +375,8 @@ async function handleSaveAnalysis() {
   if (!result.value) return
   try {
     await price.save({
-      project_name: "",
+      project_name: linkedProjectName.value || "",
+      project_id: linkedProjectId.value,
       formula_json: JSON.stringify(formula),
       cost_price: costPrice.value,
       suggested_price: result.value.suggested_price,
