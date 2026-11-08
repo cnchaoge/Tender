@@ -74,6 +74,9 @@ def analyze_old_bid(text: str) -> list[dict]:
 
 def store_analyzed_sections(doc_id: int, sections: list[dict]):
     """将拆解后的标书章节存入 SQLite 和 ChromaDB（作为特殊类型的 chunk）"""
+    from server.domain.documents.index_build import prepare_embedding_target
+
+    collection_name = prepare_embedding_target()
     embedder = get_embedder()
     conn = get_db()
     cur = conn.cursor()
@@ -113,7 +116,7 @@ def store_analyzed_sections(doc_id: int, sections: list[dict]):
     for r, v in zip(chunk_records, vectors):
         r["vector"] = v
 
-    add_chunks(doc_id, chunk_records)
+    add_chunks(doc_id, chunk_records, collection_name=collection_name)
 
     # 更新文档的 chunk_count
     cur.execute("UPDATE documents SET chunk_count = chunk_count + ? WHERE id = ?",

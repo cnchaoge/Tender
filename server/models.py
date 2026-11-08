@@ -49,6 +49,10 @@ class Document(BaseModel):
     status: str  # pending | processing | ready | failed
     created_at: str
     updated_at: str
+    scope: str = "library"  # library | project | system
+    storage: str = "external"  # managed | external
+    content_sha256: Optional[str] = None
+    extracted_relpath: Optional[str] = None
 
 
 class Chunk(BaseModel):

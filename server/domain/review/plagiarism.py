@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from fastapi import HTTPException
 
+from server.domain.documents.index_build import IndexIdentityError
 from server.tools.plagiarism_checker import get_plagiarism_checker
 
 
@@ -11,7 +12,10 @@ def check_plagiarism(bid_content: str, exclude_doc_ids: Optional[List[int]] = No
     if not bid_content or len(bid_content.strip()) < 100:
         raise HTTPException(status_code=400, detail="标书内容太短，无法进行查重检测")
     checker = get_plagiarism_checker()
-    return checker.check(
-        bid_content=bid_content,
-        exclude_doc_ids=exclude_doc_ids or [],
-    )
+    try:
+        return checker.check(
+            bid_content=bid_content,
+            exclude_doc_ids=exclude_doc_ids or [],
+        )
+    except IndexIdentityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

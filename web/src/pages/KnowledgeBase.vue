@@ -53,7 +53,7 @@
         <!-- Document list -->
         <div class="kb-doc-list" v-loading="kbStore.loading">
           <div
-            v-for="doc in dedupedDocuments"
+            v-for="doc in kbStore.documents"
             :key="doc.id"
             class="kb-doc-item"
             :class="{ active: activeDocId === doc.id }"
@@ -168,7 +168,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from "vue"
+import { ref, onMounted, nextTick } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 import { Delete, Upload, Document, MagicStick, User, Promotion, Loading } from "@element-plus/icons-vue"
 import { useKbStore } from "../stores/kb"
@@ -176,6 +176,14 @@ import { marked } from "marked"
 import api, { authFetch } from "../api"
 
 marked.setOptions({ breaks: true, gfm: true })
+
+function indexMismatchText(detail) {
+  const text = detail || "请求失败"
+  if (String(text).includes("索引与当前模型不一致")) {
+    return `${text}。请管理员在系统设置中重建索引。`
+  }
+  return text
+}
 
 function renderMarkdown(text) {
   if (!text) return ""
@@ -188,15 +196,6 @@ const kbStore = useKbStore()
 const uploading = ref(false)
 const uploadRef = ref(null)
 const activeDocId = ref(null)
-
-const dedupedDocuments = computed(() => {
-  const seen = new Set()
-  return kbStore.documents.filter(doc => {
-    if (seen.has(doc.filename)) return false
-    seen.add(doc.filename)
-    return true
-  })
-})
 
 function statusLabel(status) {
   return {
@@ -311,7 +310,16 @@ async function send() {
     })
 
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`)
+      let detail = `HTTP ${resp.status}`
+      try {
+        const data = await resp.json()
+        detail = data.detail || detail
+      } catch {
+        detail = `HTTP ${resp.status}`
+      }
+      const error = new Error(detail)
+      error.detail = detail
+      throw error
     }
 
     const reader = resp.body.getReader()
@@ -346,6 +354,12 @@ async function send() {
     }
   } catch (e) {
     if (e.status === 401) return
+    if (e.detail) {
+      const text = indexMismatchText(e.detail)
+      messages.value[msgIdx] = { role: "assistant", content: text, sources: [] }
+      ElMessage.error(text)
+      return
+    }
     // 流式失败则移除占位消息，用非流式重试
     messages.value.pop()
     loading.value = true
@@ -356,8 +370,10 @@ async function send() {
         content: resp.data.answer,
         sources: resp.data.sources,
       })
-    } catch {
-      ElMessage.error("请求失败")
+    } catch (e2) {
+      const text = indexMismatchText(e2.response?.data?.detail || "请求失败")
+      ElMessage.error(text)
+      messages.value.push({ role: "assistant", content: text, sources: [] })
     }
   } finally {
     loading.value = false

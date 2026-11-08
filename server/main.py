@@ -32,6 +32,16 @@ def _init_all_dbs():
     init_violation_db()
     _init_builtin_templates()
     init_builtin_glossary()
+    try:
+        from server.domain.documents.index_build import (
+            ensure_active_index_if_empty,
+            recover_interrupted_builds,
+        )
+
+        recover_interrupted_builds()
+        ensure_active_index_if_empty()
+    except Exception as exc:
+        print(f"[Index] 索引身份初始化失败: {exc}")
     # In-process workers die with the server. Pick up rows left pending or
     # processing by the previous process and discard any half-written chunks.
     try:

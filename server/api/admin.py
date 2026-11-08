@@ -445,6 +445,31 @@ def list_ollama_models():
 
 # ============ Embedding 模型配置 ============
 
+@router.get("/index")
+def get_index_status():
+    """当前 Embedding 与 active 索引是否同一套。不一致时 message 供页面提示重建。"""
+    from server.domain.documents.index_build import index_status
+
+    return index_status()
+
+
+@router.post("/index/rebuild")
+def rebuild_index():
+    """用现有线程池按 SQLite 切片重嵌，完成后切换 active。不删除旧集合。"""
+    from server.domain.documents.index_build import (
+        MockIndexError,
+        RebuildInProgress,
+        begin_rebuild,
+    )
+
+    try:
+        return begin_rebuild()
+    except MockIndexError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RebuildInProgress as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/embed/config", response_model=Resp)
 def save_embed_config(body: ModelConfigReq):
     """保存 Embedding 模型配置到 .env"""

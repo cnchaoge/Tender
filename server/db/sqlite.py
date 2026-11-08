@@ -151,11 +151,19 @@ def init_db():
     """)
 
     _ensure_user_columns(cur)
+    _ensure_document_columns(cur)
+    _ensure_index_builds(cur)
+    from server.domain.documents.files import backfill_document_storage
+
+    managed, external = backfill_document_storage(conn)
+    _ensure_content_hash_index(cur)
     initial_password_log = bootstrap_admin(conn, DATA_DIR)
 
     conn.commit()
     conn.close()
     print(f"[DB] SQLite initialized: {DB_PATH}")
+    if managed or external:
+        print(f"[DB] 文档原件归类：受管 {managed}，外部 {external}")
     if initial_password_log:
         print(initial_password_log)
 
@@ -173,6 +181,62 @@ def _config_set(cur: sqlite3.Cursor, key: str, value: str) -> None:
         "INSERT INTO configs (key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, value),
+    )
+
+
+def _ensure_document_columns(cur: sqlite3.Cursor) -> None:
+    """阶段 2 加法列。已有库缺哪列补哪列，不换库。"""
+    cur.execute("PRAGMA table_info(documents)")
+    columns = {row[1] for row in cur.fetchall()}
+    additions = (
+        ("content_sha256", "TEXT"),
+        ("scope", "TEXT NOT NULL DEFAULT 'library'"),
+        ("storage", "TEXT NOT NULL DEFAULT 'external'"),
+        ("extracted_relpath", "TEXT"),
+    )
+    for name, ddl in additions:
+        if name not in columns:
+            cur.execute(f"ALTER TABLE documents ADD COLUMN {name} {ddl}")
+
+
+def _ensure_index_builds(cur: sqlite3.Cursor) -> None:
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS index_builds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            embed_provider TEXT NOT NULL,
+            embed_model TEXT NOT NULL,
+            dimension INTEGER,
+            status TEXT NOT NULL,
+            collection_name TEXT NOT NULL,
+            error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER NOT NULL
+        )
+        """
+    )
+    cur.execute("SELECT version FROM schema_version LIMIT 1")
+    row = cur.fetchone()
+    if row is None:
+        cur.execute("INSERT INTO schema_version (version) VALUES (2)")
+    elif int(row["version"]) < 2:
+        cur.execute("UPDATE schema_version SET version = 2")
+
+
+def _ensure_content_hash_index(cur: sqlite3.Cursor) -> None:
+    cur.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_content_sha256
+        ON documents(content_sha256)
+        WHERE content_sha256 IS NOT NULL AND content_sha256 != ''
+        """
     )
 
 

@@ -85,6 +85,14 @@ import api, { authFetch } from "../api"
 // Configure marked
 marked.setOptions({ breaks: true, gfm: true })
 
+function indexMismatchText(detail) {
+  const text = detail || "请求失败"
+  if (String(text).includes("索引与当前模型不一致")) {
+    return `${text}。请管理员在系统设置中重建索引。`
+  }
+  return text
+}
+
 function renderMarkdown(text) {
   if (!text) return ""
   return marked.parse(text)
@@ -117,6 +125,19 @@ async function send() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: q, top_k: 5, stream: true }),
     })
+    if (!resp.ok) {
+      let detail = "请求失败"
+      try {
+        const data = await resp.json()
+        detail = data.detail || detail
+      } catch {
+        detail = "请求失败"
+      }
+      const error = new Error(detail)
+      error.status = resp.status
+      error.detail = detail
+      throw error
+    }
 
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
@@ -150,6 +171,12 @@ async function send() {
     }
   } catch (e) {
     if (e.status === 401) return
+    if (e.detail) {
+      const text = indexMismatchText(e.detail)
+      messages.value[msgIdx] = { role: "assistant", content: text, sources: [] }
+      ElMessage.error(text)
+      return
+    }
     // 流式失败，降级为非流式
     try {
       const resp = await api.post("/api/rag/query", { question: q, top_k: 5 })
@@ -159,8 +186,9 @@ async function send() {
         sources: resp.data.sources,
       }
     } catch (e2) {
-      ElMessage.error(e2.response?.data?.detail || "请求失败")
-      messages.value.splice(msgIdx, 1)
+      const text = indexMismatchText(e2.response?.data?.detail || "请求失败")
+      ElMessage.error(text)
+      messages.value[msgIdx] = { role: "assistant", content: text, sources: [] }
     }
   } finally {
     loading.value = false

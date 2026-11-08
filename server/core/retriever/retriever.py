@@ -1,8 +1,11 @@
 """
 Tender - RAG 检索器
 """
+from fastapi import HTTPException
+
 from server.db.chromadb import query_chunks
 from server.db.sqlite import get_db
+from server.domain.documents.index_build import IndexIdentityError
 
 
 def _as_doc_id(value) -> int | None:
@@ -49,10 +52,13 @@ def retrieve(query: str, top_k: int = 5, doc_ids: list[int] | None = None) -> li
     scoped = _scope_doc_ids(doc_ids)
     where = _chroma_where(scoped)
     fetch_k = top_k if where else top_k * 2
-    if where:
-        chunks = query_chunks(query, top_k=fetch_k, where=where)
-    else:
-        chunks = query_chunks(query, top_k=fetch_k)
+    try:
+        if where:
+            chunks = query_chunks(query, top_k=fetch_k, where=where)
+        else:
+            chunks = query_chunks(query, top_k=fetch_k)
+    except IndexIdentityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     # 获取文档名（一次性批量查询，避免 N+1）
     conn = get_db()
