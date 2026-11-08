@@ -103,7 +103,7 @@
               云端 API，消耗通义千问 token 额度。
             </span>
             <span v-else>
-              仅本地测试使用，不调真实 API。
+              仅本地测试使用，不调真实 API，也不能作为检索索引。
             </span>
           </div>
           <el-form-item class="form-actions">
@@ -113,6 +113,27 @@
         </el-form>
         <div v-else class="form-actions">
           <el-button type="primary" @click="editingEmbed = true">修改</el-button>
+        </div>
+        <div class="index-status">
+          <div v-if="indexInfo.message" class="text-error">{{ indexInfo.message }}</div>
+          <div v-else-if="indexInfo.active" class="action-hint">
+            当前索引：{{ indexInfo.active.embed_provider }} / {{ indexInfo.active.embed_model }}
+          </div>
+          <div v-else class="action-hint">尚未建立可供检索的索引</div>
+          <div class="form-actions">
+            <el-button
+              type="primary"
+              :loading="rebuilding || indexInfo.rebuilding"
+              :disabled="indexInfo.mock"
+              @click="rebuildIndex"
+            >重建索引</el-button>
+          </div>
+          <div v-if="indexInfo.mock" class="action-hint">
+            mock 不能作为可供检索的索引。请先改成真实 Embedding 模型并重启，再重建。
+          </div>
+          <div v-else-if="indexInfo.message" class="action-hint">
+            检索已停止，避免新旧向量混在一起。重建完成前不会返回旧结果。
+          </div>
         </div>
       </div>
 
@@ -168,13 +189,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from "vue"
+import { ref, onMounted, onUnmounted, watch } from "vue"
 import { ElMessage } from "element-plus"
 import api from "../api"
 
 const users = ref([])
 const saving = ref(false)
 const restarting = ref(false)
+const rebuilding = ref(false)
+const indexInfo = ref({
+  consistent: true,
+  message: "",
+  rebuilding: false,
+  mock: false,
+  active: null,
+})
+let indexTimer = null
 
 const cfg = ref({ provider: "deepseek", model: "deepseek-chat", api_key: "", embed_provider: "dashscope", ollama_embed_model: "" })
 const editingModel = ref(false)
@@ -207,6 +237,7 @@ watch(() => cfg.value.embed_provider, (val) => {
 
 onMounted(async () => {
   await loadConfig()
+  await loadIndex()
   if (cfg.value.provider === "ollama") fetchOllamaModels()
   try {
     const resp = await api.get("/api/admin/users")
@@ -310,6 +341,38 @@ function cancelEmbedEdit() {
   editingEmbed.value = false
   loadConfig()
 }
+
+async function loadIndex() {
+  try {
+    const resp = await api.get("/api/admin/index")
+    indexInfo.value = resp.data || indexInfo.value
+    if (indexInfo.value.rebuilding) {
+      if (!indexTimer) indexTimer = setInterval(loadIndex, 2000)
+    } else if (indexTimer) {
+      clearInterval(indexTimer)
+      indexTimer = null
+    }
+  } catch {
+    // 索引状态读不到时仍保留重建按钮
+  }
+}
+
+async function rebuildIndex() {
+  rebuilding.value = true
+  try {
+    await api.post("/api/admin/index/rebuild")
+    ElMessage.success("已开始重建索引")
+    await loadIndex()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || "重建失败")
+  } finally {
+    rebuilding.value = false
+  }
+}
+
+onUnmounted(() => {
+  if (indexTimer) clearInterval(indexTimer)
+})
 
 async function restartServer() {
   restarting.value = true
@@ -471,6 +534,15 @@ async function submitEdit(id) {
 .form-actions {
   margin-top: 8px;
   display: flex;
+  gap: 8px;
+}
+
+.index-status {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-hairline);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 

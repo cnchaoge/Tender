@@ -203,13 +203,10 @@ const availableMaterials = computed(() => {
     recMap[m.id] = m
   }
   const hasRecommended = Object.keys(recMap).length > 0
-  const seen = new Set()
   const result = []
   for (const doc of kbStore.documents) {
     if (doc.id === excludeId) continue
     if (doc.filename.startsWith('bid_')) continue  // 排除生成的投标文件
-    if (seen.has(doc.filename)) continue  // 按文件名去重
-    seen.add(doc.filename)
     if (hasRecommended && !recMap[doc.id]) continue
     result.push(recMap[doc.id]
       ? { ...recMap[doc.id], file_type: doc.file_type, chunk_count: doc.chunk_count }

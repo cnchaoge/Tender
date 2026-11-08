@@ -11,10 +11,13 @@ settings = get_settings()
 _client = None
 _collection = None
 
+LEGACY_COLLECTION = "documents"
+
 
 def get_chroma_client():
-    global _client
+    global _client, _collection
     if _client is None:
+        _collection = None
         _client = chromadb.PersistentClient(
             path=settings.CHROMA_PERSIST_DIR,
             settings=Settings(anonymized_telemetry=False)
@@ -22,20 +25,50 @@ def get_chroma_client():
     return _client
 
 
-def get_collection():
+def invalidate_collection_cache():
     global _collection
-    if _collection is None:
-        client = get_chroma_client()
-        _collection = client.get_or_create_collection(
-            name="documents",
-            metadata={"description": "Tender document chunks"}
+    _collection = None
+
+
+def open_collection(name: str, metadata: dict | None = None):
+    """打开或创建指定集合。已存在时不因为元数据不同而重建。"""
+    client = get_chroma_client()
+    try:
+        return client.get_collection(name)
+    except Exception:
+        return client.create_collection(
+            name=name,
+            metadata=metadata or {"description": "Tender document chunks"},
         )
+
+
+def get_collection():
+    """当前可写集合。身份一致时用 active，否则仍是遗留的 documents。"""
+    global _collection
+    name = LEGACY_COLLECTION
+    try:
+        from server.domain.documents.index_build import readable_collection_name
+
+        preferred = readable_collection_name()
+        if preferred:
+            name = preferred
+    except Exception:
+        name = LEGACY_COLLECTION
+    if _collection is not None:
+        # 测试可以塞进一个没有 name 的集合替身。真实集合的 name 必须和当前索引一致。
+        current = getattr(_collection, "name", None)
+        if current is None or current == name:
+            return _collection
+    _collection = open_collection(name)
     return _collection
 
 
-def add_chunks(doc_id: int, chunks: list[dict]):
+def add_chunks(doc_id: int, chunks: list[dict], collection_name: str | None = None):
     """批量添加切片到向量库（需要外部已 embed 的 vectors）"""
-    collection = get_collection()
+    if collection_name:
+        collection = open_collection(collection_name)
+    else:
+        collection = get_collection()
     ids = [f"doc{doc_id}_chunk{i}" for i, c in enumerate(chunks)]
     documents = [c["text"] for c in chunks]
     embeddings = [c["vector"] for c in chunks]
@@ -81,6 +114,9 @@ def query_chunks(query_text: str, top_k: int = 5, where: dict | None = None) -> 
     if top_k < 1 or not str(query_text or "").strip():
         return []
 
+    from server.domain.documents.index_build import assert_retrieval_identity
+
+    assert_retrieval_identity()
     collection = get_collection()
     embedder = get_embedder()
     query_vector = embedder.embed_one(query_text)
@@ -113,14 +149,27 @@ def query_chunks(query_text: str, top_k: int = 5, where: dict | None = None) -> 
 
 
 def delete_doc_chunks(doc_id: int):
-    """删除某个文档的所有切片"""
-    collection = get_collection()
-    collection.delete(where={"doc_id": doc_id})
+    """删除某个文档在各集合中的切片。打不开的退役集合忽略。"""
+    from server.domain.documents.index_build import collection_names
+
+    client = get_chroma_client()
+    for name in collection_names():
+        try:
+            collection = client.get_collection(name)
+        except Exception:
+            continue
+        try:
+            collection.delete(where={"doc_id": doc_id})
+        except Exception:
+            continue
 
 
 def reset():
     """重置向量库（测试用）"""
     client = get_chroma_client()
-    client.delete_collection("documents")
+    try:
+        client.delete_collection(LEGACY_COLLECTION)
+    except Exception:
+        pass
     global _collection
     _collection = None

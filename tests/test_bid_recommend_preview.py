@@ -152,10 +152,17 @@ class _ExactCollection:
 
 def _use_memory_chroma(monkeypatch, embedder: TopicEmbedder):
     from server.db import chromadb as chroma_mod
+    from server.domain.documents.index_build import EmbeddingIdentity
 
     collection = _ExactCollection()
     monkeypatch.setattr(chroma_mod, "_collection", collection)
     monkeypatch.setattr(chroma_mod, "get_embedder", lambda: embedder)
+    # 这组向量是测试嵌入器刚写入的，和当前配置里的模型不是同一套身份。
+    # 预览测的是排序，不测索引切换；身份门禁在 test_phase2_index 里覆盖。
+    monkeypatch.setattr(
+        "server.domain.documents.index_build.assert_retrieval_identity",
+        lambda: EmbeddingIdentity("test", "topic"),
+    )
     return chroma_mod
 
 

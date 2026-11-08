@@ -18,7 +18,9 @@ def analyze_old_bid(doc_id: int):
         raise HTTPException(status_code=404, detail="文档不存在")
 
     from server.core.parser.document import parse_file
-    text, _ = parse_file(doc["file_path"])
+    from server.domain.documents.files import resolve_stored_path
+
+    text, _ = parse_file(str(resolve_stored_path(doc["file_path"])))
 
     if len(text.strip()) < 200:
         raise HTTPException(status_code=400, detail="文档内容太少（< 200 字），无法解析")
@@ -27,7 +29,12 @@ def analyze_old_bid(doc_id: int):
     if not sections:
         return Resp(code=1, message="未能识别出标书章节结构，请确认文件是否为投标标书")
 
-    store_analyzed_sections(doc_id, sections)
+    from server.domain.documents.index_build import IndexIdentityError
+
+    try:
+        store_analyzed_sections(doc_id, sections)
+    except IndexIdentityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Resp(data={
         "doc_id": doc_id,
         "filename": doc["filename"],

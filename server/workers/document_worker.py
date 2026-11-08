@@ -15,6 +15,12 @@ from server.core.embedder.embedder import get_embedder
 from server.core.parser.document import parse_file
 from server.db.chromadb import add_chunks, delete_doc_chunks
 from server.db.sqlite import get_db
+from server.domain.documents.files import (
+    read_extracted_text,
+    resolve_stored_path,
+    write_extracted_text,
+)
+from server.domain.documents.index_build import IndexIdentityError, prepare_embedding_target, record_dimension
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +103,7 @@ def _store_chunks_and_vectors(doc_id: int, pieces: list[str]) -> None:
     if not pieces:
         return
 
+    collection_name = prepare_embedding_target()
     vectors = get_embedder().embed(pieces)
     if len(vectors) != len(pieces):
         raise RuntimeError(
@@ -111,7 +118,33 @@ def _store_chunks_and_vectors(doc_id: int, pieces: list[str]) -> None:
         }
         for index, (content, vector) in enumerate(zip(pieces, vectors))
     ]
-    add_chunks(doc_id, records)
+    add_chunks(doc_id, records, collection_name=collection_name)
+    if vectors:
+        record_dimension(len(vectors[0]))
+
+
+def _load_text(doc_id: int, file_path: str) -> str:
+    """优先读已抽出的文本，避免重新解析 PDF。没有时才解析原件并写下来。"""
+    extracted = read_extracted_text(doc_id)
+    if extracted is not None:
+        return extracted
+    text, _pages = parse_file(file_path)
+    relpath = write_extracted_text(doc_id, text or "")
+    _remember_extracted(doc_id, relpath)
+    return text or ""
+
+
+def _remember_extracted(doc_id: int, relpath: str) -> None:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE documents SET extracted_relpath=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (relpath, doc_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def process_document(doc_id: int, file_path: str) -> None:
@@ -120,16 +153,27 @@ def process_document(doc_id: int, file_path: str) -> None:
             if not _document_exists(doc_id):
                 return
             _set_status(doc_id, "processing")
-        logger.info("doc_id=%s processing %s", doc_id, file_path)
+        resolved = str(resolve_stored_path(file_path))
+        logger.info("doc_id=%s processing %s", doc_id, resolved)
 
-        text, _pages = parse_file(file_path)
+        text = _load_text(doc_id, resolved)
         pieces = chunk_text(text or "")
 
         with write_lock:
             if not _document_exists(doc_id):
                 discard_partial_artifacts(doc_id)
                 return
-            _store_chunks_and_vectors(doc_id, pieces)
+            try:
+                _store_chunks_and_vectors(doc_id, pieces)
+            except IndexIdentityError:
+                logger.exception("doc_id=%s index identity mismatch", doc_id)
+                try:
+                    delete_doc_chunks(doc_id)
+                except Exception:
+                    logger.exception("doc_id=%s vector delete after identity mismatch failed", doc_id)
+                if _document_exists(doc_id):
+                    _set_status(doc_id, "failed", len(pieces))
+                return
             if not _document_exists(doc_id):
                 discard_partial_artifacts(doc_id)
                 return
@@ -161,7 +205,7 @@ def requeue_incomplete_documents() -> int:
     queued = 0
     for row in rows:
         doc_id = row["id"]
-        file_path = row["file_path"]
+        file_path = str(resolve_stored_path(row["file_path"]))
         try:
             with write_lock:
                 discard_partial_artifacts(doc_id)

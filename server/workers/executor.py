@@ -67,6 +67,20 @@ def run_document(doc_id: int, file_path: str) -> None:
             logger.exception("cleanup after crash failed doc_id=%s", doc_id)
 
 
+def schedule_reindex(build_id: int) -> None:
+    """Queue an index rebuild on the same in-process pool as document ingest."""
+    get_executor().submit(run_reindex, build_id)
+
+
+def run_reindex(build_id: int) -> None:
+    from server.domain.documents.index_build import execute_rebuild
+
+    try:
+        execute_rebuild(build_id)
+    except Exception:
+        logger.exception("index rebuild crashed build_id=%s", build_id)
+
+
 def shutdown_executor(wait: bool = False) -> None:
     global _executor
     with _executor_lock:
