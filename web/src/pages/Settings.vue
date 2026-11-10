@@ -14,13 +14,15 @@
         <div class="card-title">
           AI 模型配置
           <span v-if="currentModelName" class="model-name-tag">{{ currentModelName }}</span>
+          <span class="egress-tag" :class="llmEgress">{{ llmEgress }}</span>
         </div>
+        <p class="egress-note">{{ llmEgressText }}</p>
         <el-form v-if="editingModel || !currentModelName" label-position="top" class="settings-form">
           <el-form-item label="提供商">
             <el-select v-model="cfg.provider" style="width: 100%">
-              <el-option label="Ollama（本地）" value="ollama" />
-              <el-option label="DeepSeek" value="deepseek" />
-              <el-option label="通义千问" value="dashscope" />
+              <el-option label="Ollama（本地）· local" value="ollama" />
+              <el-option label="DeepSeek · cloud" value="deepseek" />
+              <el-option label="通义千问 · cloud" value="dashscope" />
             </el-select>
           </el-form-item>
           <el-form-item label="模型">
@@ -70,15 +72,17 @@
         <div class="card-title">
           Embedding 模型
           <span v-if="currentEmbedName" class="model-name-tag">{{ currentEmbedName }}</span>
+          <span class="egress-tag" :class="embedEgress">{{ embedEgress }}</span>
         </div>
+        <p class="egress-note">{{ embedEgressText }}</p>
         <el-form v-if="editingEmbed || !currentEmbedName" label-position="top" class="settings-form">
           <el-form-item label="向量模型">
             <el-select v-model="cfg.embed_provider" style="width: 100%">
-              <el-option label="Ollama（本地，需指定模型）" value="ollama" />
-              <el-option label="通义千问（云，1024维）" value="dashscope" />
-              <el-option label="BGE-large（本地，384维）" value="bge" />
-              <el-option label="M3E-base（本地，768维）" value="m3e" />
-              <el-option label="Mock（仅开发测试）" value="mock" />
+              <el-option label="Ollama（本地，需指定模型）· local" value="ollama" />
+              <el-option label="通义千问（云，1024维）· cloud" value="dashscope" />
+              <el-option label="BGE-large（本地，384维）· local" value="bge" />
+              <el-option label="M3E-base（本地，768维）· local" value="m3e" />
+              <el-option label="Mock（仅开发测试）· dev" value="mock" />
             </el-select>
           </el-form-item>
           <el-form-item v-if="cfg.embed_provider === 'ollama'" label="Embedding 模型名">
@@ -94,16 +98,16 @@
           </el-form-item>
           <div class="embed-hint">
             <span v-if="cfg.embed_provider === 'ollama'">
-              本地模型，需先 <code>ollama pull {{ cfg.ollama_embed_model || 'bge-m3' }}</code>
+              需先 <code>ollama pull {{ cfg.ollama_embed_model || 'bge-m3' }}</code>。换模型后请重建索引。
             </span>
             <span v-else-if="cfg.embed_provider === 'bge' || cfg.embed_provider === 'm3e'">
-              本地模型，需联网下载。切换后需重启服务并等待模型加载。
+              首次使用会加载本地模型，不必重启进程。换模型后请重建索引。
             </span>
             <span v-else-if="cfg.embed_provider === 'dashscope'">
-              云端 API，消耗通义千问 token 额度。
+              消耗通义千问 token 额度。换模型后请重建索引。
             </span>
             <span v-else>
-              仅本地测试使用，不调真实 API，也不能作为检索索引。
+              不调用真实 API，也不能作为检索索引。
             </span>
           </div>
           <el-form-item class="form-actions">
@@ -129,7 +133,7 @@
             >重建索引</el-button>
           </div>
           <div v-if="indexInfo.mock" class="action-hint">
-            mock 不能作为可供检索的索引。请先改成真实 Embedding 模型并重启，再重建。
+            mock 不能作为可供检索的索引。请先改成真实 Embedding 模型，再重建。不必重启进程。
           </div>
           <div v-else-if="indexInfo.message" class="action-hint">
             检索已停止，避免新旧向量混在一起。重建完成前不会返回旧结果。
@@ -189,9 +193,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from "vue"
+import { ref, computed, onMounted, onUnmounted, watch } from "vue"
 import { ElMessage } from "element-plus"
 import api from "../api"
+import { CLOUD_EGRESS_NOTE, egressOf } from "../features/settings/egress"
 
 const users = ref([])
 const saving = ref(false)
@@ -207,6 +212,19 @@ const indexInfo = ref({
 let indexTimer = null
 
 const cfg = ref({ provider: "deepseek", model: "deepseek-chat", api_key: "", embed_provider: "dashscope", ollama_embed_model: "" })
+const llmEgress = computed(() => egressOf("llm", cfg.value.provider))
+const embedEgress = computed(() => egressOf("embed", cfg.value.embed_provider))
+const llmEgressText = computed(() => egressCopy("llm", llmEgress.value))
+const embedEgressText = computed(() => egressCopy("embed", embedEgress.value))
+
+function egressCopy(kind, egress) {
+  if (egress === "cloud") return CLOUD_EGRESS_NOTE
+  if (egress === "dev") return "dev：mock 只用于开发，不能成为可供检索的 active 索引。"
+  if (kind === "embed") {
+    return "local：文本留在本机。保存后下一笔作业使用新配置，不必重启进程。检索只使用当前 active 索引；模型不一致时请重建，不会把新旧向量混在一次查询里。"
+  }
+  return "local：文本留在本机。保存后下一笔生成使用新模型，不必重启进程。"
+}
 const editingModel = ref(false)
 const editingEmbed = ref(false)
 const currentModelName = ref("")
@@ -304,7 +322,7 @@ async function saveModel() {
     v.value.model_ok = false
     editingModel.value = false
     currentModelName.value = cfg.value.model
-    ElMessage.success("AI 模型配置已保存，需重启服务生效")
+    ElMessage.success({ message: `AI 模型已保存。${llmEgressText.value}`, duration: 8000 })
   } catch (e) {
     ElMessage.error("保存失败")
   } finally {
@@ -328,7 +346,7 @@ async function saveEmbed() {
     currentEmbedName.value = cfg.value.embed_provider === "ollama" && cfg.value.ollama_embed_model
       ? `Ollama / ${cfg.value.ollama_embed_model}`
       : cfg.value.embed_provider
-    ElMessage.success("Embedding 配置已保存，需重启服务生效")
+    ElMessage.success({ message: `Embedding 已保存。${embedEgressText.value}`, duration: 8000 })
   } catch (e) {
     console.error("saveEmbed error:", e.response?.data || e.message)
     ElMessage.error("保存失败")
@@ -522,6 +540,38 @@ async function submitEdit(id) {
   border: 1px solid rgba(15, 98, 254, 0.2);
   padding: 2px 8px;
   border-radius: var(--radius-xs);
+}
+.egress-tag {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+}
+.egress-tag.local {
+  background: rgba(36, 161, 72, 0.12);
+  color: var(--color-semantic-success);
+}
+.egress-tag.cloud {
+  background: rgba(245, 108, 108, 0.12);
+  color: var(--color-semantic-error);
+}
+.egress-tag.dev {
+  background: var(--color-surface-2);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-hairline);
+}
+.egress-note {
+  margin: -8px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-muted);
+}
+.embed-hint {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-tertiary);
 }
 
 /* ── Form ── */

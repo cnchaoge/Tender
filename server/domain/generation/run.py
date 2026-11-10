@@ -1,7 +1,8 @@
 """一次请求内的标书生成。
 
-非流式接口仍直接调用 `BidDraftPipeline`。流式接口是作业的兼容壳：
-创建 `bid.generate`，由进程内运行器执行 `execute_generate_job`，再把事件推出去。
+页面和 `/api/bid/generate/stream` 都创建 `bid.generate` 作业。
+非流式 `POST /api/bid/generate` 已删除。`generate_bid` 仍是同一条
+`BidDraftPipeline` 的同步入口，用来和作业执行对照。
 提示词、质检和最多重写一轮不在这里改。
 """
 import asyncio

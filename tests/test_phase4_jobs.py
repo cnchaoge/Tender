@@ -393,25 +393,34 @@ def test_restart_interrupts_generate_and_requeues_ingest(monkeypatch, tmp_path):
 
 
 def test_runtime_snapshot_survives_a_later_settings_change(monkeypatch):
-    captured = runtime_mod.capture_runtime()
-    token = runtime_mod.pin_runtime(runtime_mod.attach_clients(captured), job_id=1)
-    try:
-        from server.core.generator.llm import get_generator, settings as llm_settings
+    from server.config import get_settings
 
-        original = llm_settings.LLM_PROVIDER
-        llm_settings.LLM_PROVIDER = "mock" if original != "mock" else "ollama"
+    get_settings.cache_clear()
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "snapshot-model")
+    monkeypatch.setenv("EMBED_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_EMBED_MODEL", "embed-snapshot")
+    get_settings.cache_clear()
+    try:
+        captured = runtime_mod.capture_runtime()
+        token = runtime_mod.pin_runtime(runtime_mod.attach_clients(captured), job_id=1)
         try:
+            monkeypatch.setenv("LLM_PROVIDER", "mock")
+            monkeypatch.setenv("OLLAMA_MODEL", "other-model")
+            get_settings.cache_clear()
+            from server.core.generator.llm import get_generator
+
             generator = get_generator()
-            assert getattr(generator, "model", None) == captured["llm_model"]
-        finally:
-            llm_settings.LLM_PROVIDER = original
-        assert captured["egress"] in {"local", "cloud"}
-        if captured["llm_provider"] in {"deepseek", "dashscope", "openai", "minimax"} or captured["embed_provider"] == "dashscope":
-            assert captured["egress"] == "cloud"
-        else:
+            assert getattr(generator, "model", None) == "snapshot-model"
+            assert captured["llm_model"] == "snapshot-model"
             assert captured["egress"] == "local"
+            fresh = runtime_mod.capture_runtime()
+            assert fresh["llm_provider"] == "mock"
+            assert fresh["llm_model"] == "mock"
+        finally:
+            runtime_mod.reset_runtime(token)
     finally:
-        runtime_mod.reset_runtime(token)
+        get_settings.cache_clear()
 
 
 def test_document_status_is_projection_of_latest_ingest(monkeypatch, tmp_path):

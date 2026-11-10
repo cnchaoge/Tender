@@ -179,17 +179,15 @@ def test_pipeline_uses_generate_or_stream_and_retries_once(monkeypatch):
 
 
 def test_routes_delegate_prompt_building():
-    """路由只转发。提示词和重写仍在领域模块，作业执行仍走 BidDraftPipeline。"""
+    """路由只转发。非流式生成路由已删除。提示词和重写仍在领域模块。"""
     from server.api import bid
     from server.domain.generation import run as generation_run
 
-    batch_route = inspect.getsource(bid.generate_bid)
+    assert not hasattr(bid, "generate_bid")
     stream_route = inspect.getsource(bid.generate_bid_stream)
-    assert "run_generate_bid" in batch_route
     assert "iter_generate_events" in stream_route
-    for source in (batch_route, stream_route):
-        assert "根据以下招标文件要求" not in source
-        assert "_get_strategy_guidance" not in source
+    assert "根据以下招标文件要求" not in stream_route
+    assert "_get_strategy_guidance" not in stream_route
 
     for fn in (generation_run.generate_bid, generation_run.execute_generate_job):
         source = inspect.getsource(fn)
@@ -352,10 +350,12 @@ def test_batch_and_stream_share_one_prompt_and_section_retrieval(monkeypatch):
         {"passed": True, "score": 91, "issues": [], "suggestions": []},
         {"passed": True, "score": 92, "issues": ["无"], "suggestions": []},
     ]
+    from server.domain.generation import run as generation_run
+
     bid, saved, retrievals, violation = _install(monkeypatch, gen, reviews)
     req = _req()
 
-    batch = bid.generate_bid(req)
+    batch = generation_run.generate_bid(req)
     events = _collect_sse(bid, req)
 
     assert len(gen.prompts) == 1
@@ -395,9 +395,11 @@ def test_batch_keeps_first_review_and_stream_rereviews(monkeypatch):
         {"passed": False, "score": 35, "issues": ["仍缺报价"], "suggestions": ["再补报价"]},
         {"passed": True, "score": 86, "issues": [], "suggestions": []},
     ]
+    from server.domain.generation import run as generation_run
+
     bid, saved, _retrievals, _violation = _install(monkeypatch, gen, reviews)
 
-    batch = bid.generate_bid(_req())
+    batch = generation_run.generate_bid(_req())
     assert batch["review"]["passed"] is False
     assert batch["review"]["score"] == 30
     assert len(gen.prompts) == 2

@@ -22,6 +22,7 @@
     </div>
   </div>
 
+  <p v-if="egressNote" class="egress-note">{{ egressNote }}</p>
   <div class="generate-actions">
     <el-button
       type="primary"
@@ -212,6 +213,7 @@ defineProps({
   formatResult: { type: Object, default: null },
   violationResult: { type: Object, default: null },
   plagiarismResult: { type: Object, default: null },
+  egressNote: { type: String, default: "" },
 })
 const emit = defineEmits(["update:selectedStrategy", "generate", "download", "cancel"])
 

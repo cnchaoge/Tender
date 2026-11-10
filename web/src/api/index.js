@@ -128,9 +128,9 @@ const rag = {
 
 // ── 标书生成 ──────────────────────────────────────────────────────────────────
 const bid = {
-  parse: (filePath) => http.post("/api/bid/parse", { file_path: filePath }),
-  // 标书正文只走 SSE。页面此前用 authFetch 手写这一请求，axios 版 generate / generateStream
-  // 没有调用方，而且 axios 会把整段事件流缓冲完，带不上章节和策略。
+  // 解析按文档 id 创建 project.parse 作业，不再提交 file_path。
+  // 非流式 POST /api/bid/generate 已删除。页面订阅 /api/jobs 的事件。
+  // 下面这条仍是兼容壳：创建 bid.generate，再把作业事件按 SSE 推出去。
   openGenerateStream: (payload) => authFetch(`${apiBase()}/api/bid/generate/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -1,18 +1,17 @@
 """招标文件解析与字段补全。
 
-带 `file_path` 的旧接口保留到阶段 5。内部先找到受管原件再解析。
-带 `document_id` 和 `project_id` 时，解析结果写入 ParseSnapshot。
+只接受文档 id，再去读受管原件。调用方不传磁盘路径。
+带 `project_id` 时，解析结果写入 ParseSnapshot。
 """
 import os
 import re
-from pathlib import Path
 
 from fastapi import HTTPException
 
 from server.core.generator.llm import get_generator
 from server.core.retriever.retriever import retrieve
 from server.db.sqlite import get_db
-from server.domain.documents.files import relative_to_data, resolve_stored_path
+from server.domain.documents.files import resolve_stored_path
 from server.models import BidParseReq, BidParseResp
 
 def _json_clean(raw: str) -> str:
@@ -161,83 +160,37 @@ def _health_check(text: str, file_path: str) -> dict:
     return {"status": status, "checks": checks}
 
 
-def _find_document_by_path(file_path: str):
-    """file_path 能对上受管副本时返回那一行，解析读的是这份副本。"""
-    raw = Path(file_path)
-    keys = {file_path}
-    if raw.is_absolute():
-        try:
-            keys.add(relative_to_data(raw))
-        except Exception:
-            pass
-    else:
-        keys.add(str(resolve_stored_path(file_path)))
+def reject_path_parse(req: BidParseReq) -> None:
+    """磁盘路径不再是解析入口。非空 file_path 直接拒绝。"""
+    if (req.file_path or "").strip():
+        raise HTTPException(status_code=400, detail="不再接受 file_path，请传 document_id")
+    if req.document_id is None:
+        raise HTTPException(status_code=400, detail="需要 document_id")
+
+
+def resolve_parse_source(document_id: int | None) -> tuple[str, int]:
+    """返回 (要解析的受管路径, 文档 id)。"""
+    if document_id is None:
+        raise HTTPException(status_code=400, detail="需要 document_id")
     conn = get_db()
     try:
         cur = conn.cursor()
-        for key in keys:
-            cur.execute(
-                "SELECT * FROM documents WHERE file_path = ? ORDER BY id LIMIT 1",
-                (key,),
-            )
-            row = cur.fetchone()
-            if row is not None:
-                return row
-        if not raw.exists():
-            return None
-        try:
-            resolved = raw.resolve()
-        except OSError:
-            return None
-        cur.execute("SELECT id, file_path FROM documents")
-        for item in cur.fetchall():
-            stored = resolve_stored_path(item["file_path"])
-            try:
-                if stored.is_file() and stored.resolve() == resolved:
-                    cur.execute("SELECT * FROM documents WHERE id = ?", (item["id"],))
-                    return cur.fetchone()
-            except OSError:
-                continue
-        return None
+        cur.execute("SELECT * FROM documents WHERE id = ?", (document_id,))
+        row = cur.fetchone()
     finally:
         conn.close()
-
-
-def resolve_parse_source(file_path: str | None, document_id: int | None) -> tuple[str, int | None]:
-    """返回 (要解析的路径, 文档 id)。文档 id 优先；旧路径先对受管文件。"""
-    if document_id is not None:
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM documents WHERE id = ?", (document_id,))
-            row = cur.fetchone()
-        finally:
-            conn.close()
-        if row is None:
-            raise HTTPException(status_code=404, detail="文件不存在")
-        path = resolve_stored_path(row["file_path"])
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="文件不存在")
-        return str(path), int(document_id)
-
-    if not file_path:
-        raise HTTPException(status_code=400, detail="需要 file_path 或 document_id")
-
-    row = _find_document_by_path(file_path)
-    if row is not None:
-        managed = resolve_stored_path(row["file_path"])
-        if managed.is_file():
-            return str(managed), int(row["id"])
-        if os.path.exists(file_path):
-            return file_path, int(row["id"])
-    if os.path.exists(file_path):
-        return file_path, None
-    raise HTTPException(status_code=404, detail="文件不存在")
+    if row is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    path = resolve_stored_path(row["file_path"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return str(path), int(document_id)
 
 
 def parse_bid_file(req: BidParseReq, job_id: int | None = None):
     """解析招标文件。项目上的解析会多写一条快照，不覆盖用户改过的项目字段。"""
-    path, document_id = resolve_parse_source(req.file_path, req.document_id)
+    reject_path_parse(req)
+    path, document_id = resolve_parse_source(req.document_id)
     if req.project_id is not None:
         from server.domain.projects.service import require_project
 

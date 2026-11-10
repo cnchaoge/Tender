@@ -350,7 +350,7 @@ def update_config(body: SystemConfigUpdate):
         update_env_many(updates)
     except ValueError:
         raise HTTPException(status_code=400, detail="配置值无效") from None
-    return Resp(message="配置已保存，需重启服务生效")
+    return Resp(message="配置已保存。下一笔作业使用新配置，不必重启进程")
 
 
 # ============ AI 模型配置 ============
@@ -422,7 +422,7 @@ def save_model_config(body: ModelConfigReq):
         update_env("LLM_PROVIDER", "dashscope")
         update_env("DASHSCOPE_API_KEY", body.api_key)
         update_env("DASHSCOPE_MODEL", body.model or "qwen-turbo")
-    return Resp(message="配置已保存，需重启服务生效")
+    return Resp(message="配置已保存。下一笔作业使用新配置，不必重启进程")
 
 
 # ============ Ollama 模型列表 ============
@@ -477,7 +477,7 @@ def save_embed_config(body: ModelConfigReq):
         update_env("EMBED_PROVIDER", body.embed_provider)
     if body.ollama_embed_model:
         update_env("OLLAMA_EMBED_MODEL", body.ollama_embed_model)
-    return Resp(message="Embedding 配置已保存，需重启服务生效")
+    return Resp(message="Embedding 配置已保存。下一笔作业使用新配置，不必重启进程。检索仍只使用当前 active 索引")
 
 
 # ============ 服务重启 ============

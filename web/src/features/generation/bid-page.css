@@ -845,6 +845,12 @@
   color: var(--color-ink-tertiary);
   line-height: 1.3;
 }
+.bid-page .egress-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-muted);
+}
 .bid-page .generate-actions {
   display: flex;
   gap: 8px;

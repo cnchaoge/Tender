@@ -1,12 +1,11 @@
-import importlib
 import math
+from types import SimpleNamespace
 
 from server.core.embedder import embedder as embedder_mod
 
 
-def test_get_embedder_mock():
-    # ensure provider is mock for test isolation
-    embedder_mod.settings.EMBED_PROVIDER = 'mock'
+def test_get_embedder_mock(monkeypatch):
+    monkeypatch.setattr(embedder_mod, "get_settings", lambda: SimpleNamespace(EMBED_PROVIDER="mock"))
     inst = embedder_mod.get_embedder()
     assert inst.__class__.__name__ == 'MockEmbedder'
 

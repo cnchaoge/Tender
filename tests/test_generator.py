@@ -1,10 +1,10 @@
-from importlib import import_module
+from types import SimpleNamespace
 
 from server.core.generator import llm as llm_mod
 
 
-def test_get_generator_mock():
-    llm_mod.settings.LLM_PROVIDER = 'mock'
+def test_get_generator_mock(monkeypatch):
+    monkeypatch.setattr(llm_mod, "get_settings", lambda: SimpleNamespace(LLM_PROVIDER="mock"))
     g = llm_mod.get_generator()
     assert g.__class__.__name__ == 'MockGenerator'
 

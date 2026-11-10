@@ -6,9 +6,11 @@ from server.core.embedder import embedder as embedder_mod
 
 
 def test_dashscope_batch_and_api_key(monkeypatch):
-    # Ensure settings
-    embedder_mod.settings.DASHSCOPE_API_KEY = 'test-key'
-    embedder_mod.settings.DASHSCOPE_EMBED_MODEL = 'm'
+    monkeypatch.setattr(
+        embedder_mod,
+        "get_settings",
+        lambda: SimpleNamespace(DASHSCOPE_API_KEY="test-key", DASHSCOPE_EMBED_MODEL="m"),
+    )
 
     call_count = {'n': 0}
 
@@ -35,7 +37,11 @@ def test_dashscope_batch_and_api_key(monkeypatch):
     assert call_count['n'] == 2
 
     # Missing API key should raise
-    embedder_mod.settings.DASHSCOPE_API_KEY = ''
+    monkeypatch.setattr(
+        embedder_mod,
+        "get_settings",
+        lambda: SimpleNamespace(DASHSCOPE_API_KEY="", DASHSCOPE_EMBED_MODEL="m"),
+    )
     de2 = embedder_mod.DashScopeEmbedder()
     try:
         de2.embed(['x'])

@@ -11,7 +11,6 @@ from pydantic import BaseModel
 
 from server.config import GENERATED_DIR
 from server.deps import get_current_user
-from server.domain.generation.run import generate_bid as run_generate_bid
 from server.domain.generation.run import iter_generate_events
 from server.domain.generation.templates import (
     create_template as create_template_row,
@@ -93,12 +92,14 @@ class PlagiarismCheckResp(BaseModel):
 
 @router.post("/parse")
 def parse_bid_file(req: BidParseReq, user: dict = Depends(get_current_user)):
-    """创建 project.parse 作业后立即返回。结果在作业的 result 里。"""
+    """创建 project.parse 作业后立即返回。只接受文档 id，不接受磁盘路径。"""
+    from server.domain.generation.parse import reject_path_parse
     from server.domain.jobs.service import enqueue
 
+    reject_path_parse(req)
     return enqueue(
         "project.parse",
-        payload=req.model_dump(),
+        payload=req.model_dump(exclude={"file_path"}),
         project_id=req.project_id,
         document_id=req.document_id,
         created_by=user.get("id"),
@@ -118,15 +119,9 @@ def plan_bid(req: BidPlanReq, user: dict = Depends(get_current_user)):
     )
 
 
-@router.post("/generate", response_model=dict)
-def generate_bid(req: BidGenerateReq):
-    """根据招标文件生成标书（带 AI 质检，非流式）。正文生成走 BidDraftPipeline。"""
-    return run_generate_bid(req)
-
-
 @router.post("/generate/stream")
 async def generate_bid_stream(req: BidGenerateReq):
-    """SSE 流式生成标书。组 prompt、调用模型和质检重写与非流式接口共用 BidDraftPipeline。"""
+    """兼容壳：创建 bid.generate 作业，并把作业事件按原来的 SSE 形状推出去。"""
     return StreamingResponse(
         iter_generate_events(req),
         media_type="text/event-stream",

@@ -383,7 +383,7 @@ def test_projects_are_shared_and_parse_snapshot_survives_refresh(api_client, mon
 
     parsed = api_client.post(
         "/api/bid/parse",
-        json={"file_path": uploaded.json()["file_path"], "project_id": project_id},
+        json={"document_id": document_id, "project_id": project_id},
         headers=_auth(token_a),
     )
     parsed_body = _wait_job(api_client, parsed, _auth(token_a))
@@ -469,9 +469,10 @@ def test_projects_are_shared_and_parse_snapshot_survives_refresh(api_client, mon
     assert user_b != user_a
 
 
-def test_file_path_parse_without_project_still_works(api_client, monkeypatch, tmp_path):
+def test_parse_requires_document_id_and_rejects_file_path(api_client, monkeypatch, tmp_path):
     _add_user("phase3-parse")
     token = _login(api_client, "phase3-parse")
+    headers = _auth(token)
     monkeypatch.setattr(
         "server.domain.generation.parse.get_generator",
         lambda: _Generator([_parse_payload("松散文件", "7天")]),
@@ -479,14 +480,53 @@ def test_file_path_parse_without_project_still_works(api_client, monkeypatch, tm
     monkeypatch.setattr("server.domain.generation.parse.retrieve", lambda *args, **kwargs: [])
     loose = tmp_path / "loose.txt"
     loose.write_text("项目名称：松散文件\n" + ("正文" * 80), encoding="utf-8")
-    resp = api_client.post(
+
+    rejected = api_client.post(
         "/api/bid/parse",
         json={"file_path": str(loose)},
-        headers=_auth(token),
+        headers=headers,
     )
-    body = _wait_job(api_client, resp, _auth(token))
+    assert rejected.status_code == 400
+    assert "document_id" in rejected.json()["detail"]
+
+    conn = sqlite_mod.get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO documents (filename, file_type, file_path, file_size, status, chunk_count)
+               VALUES ('loose.txt', 'txt', ?, ?, 'ready', 0)""",
+            (str(loose), loose.stat().st_size),
+        )
+        document_id = int(cur.lastrowid)
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = api_client.post(
+        "/api/bid/parse",
+        json={"document_id": document_id},
+        headers=headers,
+    )
+    body = _wait_job(api_client, resp, headers)
     assert body["project_name"] == "松散文件"
     assert _count("SELECT COUNT(*) FROM parse_snapshots") == 0
+
+    queued = api_client.post(
+        "/api/jobs",
+        json={"type": "project.parse", "payload": {"file_path": str(loose)}},
+        headers=headers,
+    )
+    assert queued.status_code == 200, queued.text
+    job_id = queued.json()["id"]
+    last = queued.json()
+    for _ in range(100):
+        current = api_client.get(f"/api/jobs/{job_id}", headers=headers)
+        last = current.json()
+        if last["status"] in {"succeeded", "failed", "cancelled", "interrupted"}:
+            break
+        time.sleep(0.05)
+    assert last["status"] == "failed"
+    assert "document_id" in (last.get("message") or "")
 
 
 def test_checklist_checks_survive_a_new_version(api_client):
