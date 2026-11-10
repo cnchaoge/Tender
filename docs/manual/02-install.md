@@ -1,59 +1,78 @@
 # 二、安装与启动
 
-## 获取程序
+官方用法是在本机用 Python 虚拟环境从源码运行。仓库没有 GitHub Release，也没有可下载的 `Tender.exe`。Mac 和 Linux 不需要装 Windows 虚拟机。
 
-从 GitHub 下载最新版本：
+## 准备环境
 
-👉 [https://github.com/cnchaoge/tender/releases](https://github.com/cnchaoge/tender/releases)
+需要 Python 3.10 或 3.11（与 CI 相同）、Node.js，以及一份只给这一台机器用的 `.env`。
 
-下载 `Tender.exe`（Windows 单文件版）
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+```
 
----
+本地开发不填写 `SECRET_KEY` 时，首次启动会在 `data/.secret_key` 生成密钥并在以后复用，权限 `0600`，不写回 `.env`。`DEBUG=false` 或 `APP_ENV=production` 时必须自己设置 `SECRET_KEY`，否则进程拒绝启动。
 
-## 首次启动
+`.env` 和 `data/.secret_key` 都是机密，不要发到聊天或网盘公开链接。
 
-**步骤 1：** 双击运行 `Tender.exe`
+## 先构建前端，再启动一个进程
 
-**步骤 2：** 全新安装会在服务日志中打印一次性管理员密码，并写入程序目录下的 `data/initial_admin_password.txt`
+浏览器请求的是相对路径 `/api`，所以页面和接口必须由同一个进程提供。先构建 `web/dist`，再启动。
 
-**步骤 3：** 浏览器打开 `http://localhost:8000`，使用用户名 `admin` 和该一次性密码登录
+```bash
+cd web
+npm install
+npm run build
+cd ..
+bash start.sh
+```
 
-**步骤 4：** 系统要求立即设置新密码。完成后删除 `data/initial_admin_password.txt`
+`start.sh`（Windows 用 `run.bat`）只启动**一个** uvicorn 进程：
 
-生产环境请在启动前设置环境变量 `SECRET_KEY`（`DEBUG=false` 或 `APP_ENV=production` 时不设置将无法启动）。本地开发未设置时，会在 `data/.secret_key` 生成并复用一个密钥。
+- 不使用 `--reload`
+- 不要再加 `--workers`。多个进程同时打开同一份 Chroma 和 SQLite 会损坏数据
+- 默认绑定 `127.0.0.1:8000`。只给本机用时保持这样
 
----
+浏览器打开 `http://127.0.0.1:8000`。
 
-## 配置 AI API Key
+同事要从别的电脑访问时，不要把 FastAPI 直接铺到办公室局域网。HTTPS 反向代理不在本文范围内。
 
-> Tender 需要连接 AI 模型服务才能正常工作。
+## 首次登录
 
-**步骤 1：** 登录后进入 **系统设置** 页面
+全新安装会把一次性管理员密码写入 `data/initial_admin_password.txt`（仅当前用户可读），用户名是 `admin`。用该密码登录后按提示修改，然后删除这个密码文件。
 
-**步骤 2：** 在「AI 模型配置」中填入 DeepSeek API Key
+## 配置 AI 模型
 
-**步骤 3：** 保存后即可开始使用
-
-### 如何获取 API Key
+登录后进入 **系统设置**。默认可以使用本机 Ollama。若改用 DeepSeek 或通义，在设置里保存对应 API Key。保存后按页面提示重启进程。
 
 | 模型 | 获取地址 |
 |------|----------|
-| **DeepSeek** | [platform.deepseek.com](https://platform.deepseek.com) 注册后创建 API Key |
+| **DeepSeek** | [platform.deepseek.com](https://platform.deepseek.com) |
 | **通义千问** | 阿里云百炼平台 |
+| **Ollama** | 本机 `http://localhost:11434`，无需 API Key |
 
----
+## 开发时的前端热更新
 
-## 开发模式运行（可选）
-
-如需修改代码或调试，可从源码启动：
+后端仍然用 `bash start.sh`，不要改成 `uvicorn --reload`。另开一个终端：
 
 ```bash
-# 前端（开发模式，热更新）
-cd tender/web
+cd web
 npm install
-npm run dev     # 访问 http://localhost:5173
-
-# 后端（另一个终端）
-cd tender
-./start.sh      # 访问 http://localhost:8000
+npm run dev
 ```
+
+开发服务器在 `http://127.0.0.1:5173`，把浏览器的 `/api` 代理到本机 `8000`。页面里的接口地址仍然是相对路径 `/api`。
+
+## 交给同事之前
+
+1. 在 `web/` 执行 `npm run build`，确认生成了 `web/dist`。
+2. 用虚拟环境、`.env` 和 `bash start.sh` 从源码启动。不要从 Releases 下载程序。
+3. 只有本机已经有 `web/dist` 时，才可以用 `pyinstaller Tender.spec` 打包装包。没有 dist 时不要承诺有 exe。
+
+## 可选：macOS launchd 示例
+
+`docs/ops/com.tender.local.plist.example` 是一份示例，**不会**被 `start.sh` 安装。若要使用，把其中的绝对路径改成这台机器的仓库和 `.venv`，不要加入 `--workers` 或 `--reload`。需要开机拉起时再把 `RunAtLoad` / `KeepAlive` 改成 `true`，并保证同时只有这一个进程打开 `data/`。
+
+备份和恢复见 [备份与恢复](/ops/backup-and-recovery)。

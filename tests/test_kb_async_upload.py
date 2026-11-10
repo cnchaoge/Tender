@@ -136,6 +136,7 @@ def client(getter, tmp_path, monkeypatch):
     monkeypatch.setattr(files_mod, "DATA_DIR", tmp_path)
     monkeypatch.setattr(kb_mod, "get_db", getter)
     monkeypatch.setattr(kb_mod, "schedule_document", fake_schedule)
+    monkeypatch.setattr(kb_mod, "_scan_roots", lambda: [tmp_path.resolve()])
     return TestClient(_authorized_app()), scheduled
 
 
@@ -353,7 +354,7 @@ def test_upload_returns_while_worker_is_still_blocked(getter, tmp_path, monkeypa
         shutdown_executor(wait=True)
 
 
-def test_folder_import_queues_pending_without_parsing(client, tmp_path, monkeypatch):
+def test_folder_import_queues_pending_without_parsing(client, tmp_path, getter, monkeypatch):
     http, scheduled = client
 
     def explode(*_args, **_kwargs):
@@ -390,6 +391,91 @@ def test_folder_import_queues_pending_without_parsing(client, tmp_path, monkeypa
         assert stored.name.startswith("original")
     assert (folder / "ok.txt").read_text(encoding="utf-8") == "hello"
     assert (folder / "nested" / "ok.txt").read_text(encoding="utf-8") == "duplicate name"
+    conn = getter()
+    try:
+        rows = conn.execute(
+            "SELECT filename, file_path, storage FROM documents ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows
+    for row in rows:
+        assert row["storage"] == "managed"
+        assert row["file_path"].startswith("library/")
+        assert "incoming" not in Path(row["file_path"]).parts
+
+
+def test_folder_scan_rejects_paths_outside_allowlist(client, tmp_path, monkeypatch):
+    allowed = tmp_path / "allowed"
+    banned = tmp_path / "banned"
+    allowed.mkdir()
+    banned.mkdir()
+    (banned / "secret.txt").write_text("do-not-import", encoding="utf-8")
+    monkeypatch.setattr(kb_mod, "_scan_roots", lambda: [allowed.resolve()])
+    http, scheduled = client
+
+    rejected = http.get("/api/kb/folder", params={"folder_path": str(banned)})
+    assert rejected.status_code == 403
+    assert "KB_SCAN_ROOTS" in rejected.json()["detail"]
+    assert scheduled == []
+    assert (banned / "secret.txt").read_text(encoding="utf-8") == "do-not-import"
+    library = tmp_path / "library"
+    assert not library.exists() or list(library.rglob("original*")) == []
+
+    monkeypatch.setattr(kb_mod, "_scan_roots", lambda: [])
+    empty_list = http.get("/api/kb/folder", params={"folder_path": str(allowed)})
+    assert empty_list.status_code == 403
+    assert scheduled == []
+
+
+def test_folder_import_skips_symlink_that_leaves_allowlist(client, tmp_path, monkeypatch):
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("secret-body", encoding="utf-8")
+    (allowed / "link.txt").symlink_to(secret)
+    (allowed / "ok.txt").write_text("visible", encoding="utf-8")
+    linked_dir = allowed / "linked-dir"
+    linked_dir.symlink_to(outside, target_is_directory=True)
+    (outside / "nested.txt").write_text("nested-secret", encoding="utf-8")
+    monkeypatch.setattr(kb_mod, "_scan_roots", lambda: [allowed.resolve()])
+
+    http, scheduled = client
+    resp = http.get("/api/kb/folder", params={"folder_path": str(allowed)})
+    assert resp.status_code == 200, resp.text
+    assert [doc["filename"] for doc in resp.json()] == ["ok.txt"]
+    assert len(scheduled) == 1
+    stored = Path(scheduled[0][1])
+    assert stored.is_file()
+    assert stored.read_text(encoding="utf-8") == "visible"
+    assert secret.read_text(encoding="utf-8") == "secret-body"
+    assert (outside / "nested.txt").read_text(encoding="utf-8") == "nested-secret"
+
+
+def test_folder_import_enforces_size_limit_and_keeps_original(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(kb_mod, "max_upload_bytes", lambda: 4)
+    http, scheduled = client
+    folder = tmp_path / "drop"
+    folder.mkdir()
+    (folder / "big.txt").write_bytes(b"12345")
+    (folder / "small.txt").write_bytes(b"abc")
+
+    mixed = http.get("/api/kb/folder", params={"folder_path": str(folder)})
+    assert mixed.status_code == 200, mixed.text
+    assert [doc["filename"] for doc in mixed.json()] == ["small.txt"]
+    assert (folder / "big.txt").read_bytes() == b"12345"
+    assert (folder / "small.txt").read_bytes() == b"abc"
+    assert len(scheduled) == 1
+
+    only_big = tmp_path / "only-big"
+    only_big.mkdir()
+    (only_big / "big.txt").write_bytes(b"12345")
+    rejected = http.get("/api/kb/folder", params={"folder_path": str(only_big)})
+    assert rejected.status_code == 413
+    assert (only_big / "big.txt").read_bytes() == b"12345"
+    assert len(scheduled) == 1
 
 
 def _patch_worker(monkeypatch, getter, parse_result=("正文", []), pieces=None, embed=None, add=None, delete=None):

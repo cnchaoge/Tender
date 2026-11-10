@@ -69,15 +69,18 @@ LLM_PROVIDER=ollama
 OLLAMA_MODEL=qwen3:4b
 ```
 
-### 3. 启动服务
+### 3. 构建前端并启动一个进程
 
 ```bash
-python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
+cd web && npm install && npm run build && cd ..
+bash start.sh
 ```
+
+`start.sh` 只启动一个 uvicorn 进程，不使用 `--reload`，也不要再加 `--workers`。Chroma 和 SQLite 不能被两个进程同时打开。默认绑定 `127.0.0.1`。
 
 ### 4. 打开浏览器
 
-- 访问 http://localhost:8000
+- 访问 http://127.0.0.1:8000
 - 全新安装时，启动日志会打印一次性管理员密码，并写入 `data/initial_admin_password.txt`。该文件权限为仅当前用户可读，且已被 gitignore
 - 用户名是 `admin`。用该一次性密码登录后，必须立刻修改密码，然后删除密码文件
 - 修改完成或管理员被删除之后，重启不会再创建账号，也不会再写回旧的公开密码
@@ -112,7 +115,9 @@ SECRET_KEY=上一步生成的字符串
 
 ## 🖥️ 部署方式
 
-支持 **Windows** 和 **Linux** 双系统，无需 Docker。离线网络环境也可交付。
+在 macOS、Linux 或 Windows 上用 Python 虚拟环境和已构建的 `web/dist` 运行，无需 Docker。仓库没有 GitHub Release，也没有可下载的 `Tender.exe`。只有本机已经生成 `web/dist` 时，才可以用 `Tender.spec` 打包装包。
+
+备份见 `docs/ops/backup-and-recovery.md`。先停进程，再把 SQLite、Chroma、`data/library/`、`.env` 和 `data/.secret_key` 作为同一套拷走。`.env` 和 `data/.secret_key` 是机密。
 
 ---
 

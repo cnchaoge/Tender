@@ -37,7 +37,7 @@
 |------|------|
 | **SQLite** | 元数据（用户、文档记录、配置等） |
 | **ChromaDB** | 向量数据（文档切片） |
-| **文件系统** | `data/uploads/` 原始文件，`data/generated/` 生成文件 |
+| **文件系统** | 受管原件在 `data/library/`。`data/uploads/` 只是旧目录，还在才会被备份。导出文件在 `data/generated/` |
 
 ## 关键技术栈
 

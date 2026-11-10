@@ -11,6 +11,10 @@ from server.config import DATA_DIR, write_private_text
 
 DB_PATH = DATA_DIR / "tender.db"
 
+# Milliseconds. WAL lets readers proceed during a commit. The busy timeout
+# waits out a short lock instead of failing the request immediately.
+SQLITE_BUSY_TIMEOUT_MS = 10000
+
 BOOTSTRAP_ADMIN_USERNAME = "admin"
 BOOTSTRAP_DONE_KEY = "bootstrap_admin_done"
 LEGACY_PASSWORD_CHECKED_KEY = "legacy_default_password_checked"
@@ -22,10 +26,21 @@ LEGACY_ADMIN_PASSWORD = "admin123"
 _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+def configure_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
+    """Enable WAL and a bounded lock wait on every connection this process opens."""
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     return conn
+
+
+def get_db():
+    conn = sqlite3.connect(
+        DB_PATH,
+        check_same_thread=False,
+        timeout=SQLITE_BUSY_TIMEOUT_MS / 1000,
+    )
+    return configure_connection(conn)
 
 
 def init_db():

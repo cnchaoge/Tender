@@ -1,9 +1,4 @@
-import { authFetch } from "../../api/index.js"
-
-function apiBase() {
-  const isDev = import.meta.env.DEV
-  return isDev ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000")
-}
+import { apiBase, authFetch } from "../../api/index.js"
 
 export function createJob(body) {
   return authFetch(`${apiBase()}/api/jobs`, {

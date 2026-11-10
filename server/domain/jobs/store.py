@@ -31,11 +31,11 @@ class JobFailed(Exception):
 
 
 def _connect():
-    from server.db.sqlite import get_db
+    from server.db.sqlite import SQLITE_BUSY_TIMEOUT_MS, get_db
 
     conn = get_db()
     try:
-        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     except Exception:
         pass
     return conn
@@ -360,13 +360,24 @@ def finish(job_id: int, status: str, *, message: str = "", result: dict | None =
                 int(job_id),
             ),
         )
+        if cur.rowcount:
+            cur.execute(
+                "SELECT type, document_id, status FROM jobs WHERE id = ?",
+                (int(job_id),),
+            )
+            row = cur.fetchone()
+            if row and row["type"] == "document.ingest" and row["document_id"]:
+                projected = _DOC_STATUS.get(row["status"], row["status"])
+                cur.execute(
+                    """UPDATE documents
+                       SET status = ?, updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ?""",
+                    (projected, int(row["document_id"])),
+                )
         conn.commit()
     finally:
         conn.close()
-    job = get_job_row(job_id)
-    if job["type"] == "document.ingest" and job["document_id"]:
-        project_document_status(int(job["document_id"]), job["status"])
-    return job
+    return get_job_row(job_id)
 
 
 def update_progress(job_id: int, progress: int, message: str | None = None) -> None:

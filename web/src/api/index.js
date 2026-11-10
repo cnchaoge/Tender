@@ -1,16 +1,16 @@
 import axios from "axios"
 
-const isDev = import.meta.env.DEV
+// Same-origin `/api`. Dev Vite proxies `/api` to the backend. A production
+// build is served by that same process, so a page opened with a LAN address
+// still talks to the host that served the page.
+export function apiBase() {
+  return ""
+}
 
-// axios 实例：dev 模式走相对路径（由 Vite proxy 转发），生产模式用完整 URL
 const http = axios.create({
-  baseURL: isDev ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000"),
+  baseURL: apiBase(),
   timeout: 60000
 })
-
-function apiBase() {
-  return isDev ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8000")
-}
 
 export function redirectToLogin() {
   localStorage.removeItem("token")

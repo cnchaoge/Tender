@@ -5,8 +5,8 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ## Commands
 
 ```bash
-# Backend — run dev server (hot reload)
-uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
+# Backend — official local start (one process, no --reload, no --workers)
+bash start.sh
 
 # Backend — install dependencies
 pip install -r requirements.txt
@@ -14,14 +14,11 @@ pip install -r requirements.txt
 # Frontend — dev server (port 5173, proxies /api to :8000)
 cd web && npm run dev
 
-# Frontend — build production dist
+# Frontend — production build (browser calls relative /api)
 cd web && npm run build
 
 # Frontend — install dependencies
 cd web && npm install
-
-# Frontend — build when changing .env.production (updates VITE_API_URL)
-cd web && npm run build
 
 # Backend — PyInstaller single-file exe packaging
 pyinstaller Tender.spec
@@ -105,7 +102,7 @@ web/src/
 └── stores/          # Pinia stores (auth.js + kb.js for token/user and KB state)
 ```
 
-- **Vite dev server** (port 5173) proxies `/api` to `localhost:8000`. Production uses `VITE_API_URL` from `.env.production`.
+- **Vite dev server** (port 5173) proxies `/api` to `localhost:8000`. The browser, in dev and in production, calls relative `/api` on the host that served the page.
 - **SPA routing**: All non-API, non-asset paths fall back to `index.html` via `main.py`'s `spa_fallback`. The `docs/` directory (Docsify documentation site) is also served as static files.
 - **Auth**: JWT token stored in Pinia + localStorage. Axios interceptor redirects to `/login` on 401.
 
@@ -117,7 +114,8 @@ All configuration is via `.env` at project root. Key vars:
 |-----|---------|---------|
 | `LLM_PROVIDER` | `ollama` | LLM backend: ollama/dashscope/openai/minimax/deepseek/mock |
 | `EMBED_PROVIDER` | `ollama` | Embedding backend: ollama/dashscope/bge/m3e/mock |
-| `HOST` | `0.0.0.0` | Server bind address |
+| `HOST` | `127.0.0.1` | Server bind address. Official start is one process, no `--reload` or `--workers` |
+| `KB_SCAN_ROOTS` | empty | Allowlist for folder import. Empty disables scan. Home and filesystem roots are ignored |
 | `PORT` | `8000` | Server port |
 | `DEBUG` | `true` | Debug mode. `false` requires a unique `SECRET_KEY` |
 | `APP_ENV` | `development` | `production` requires a unique `SECRET_KEY` |
