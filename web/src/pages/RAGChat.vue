@@ -80,7 +80,7 @@ import { ref, nextTick } from "vue"
 import { ElMessage } from "element-plus"
 import { Loading, MagicStick, User, Promotion } from "@element-plus/icons-vue"
 import { marked } from "marked"
-import api, { authFetch } from "../api"
+import api, { apiBase, authFetch } from "../api"
 
 // Configure marked
 marked.setOptions({ breaks: true, gfm: true })
@@ -103,10 +103,6 @@ const messages = ref([])
 const loading = ref(false)
 const messagesEl = ref()
 
-const _apiBase = import.meta.env.DEV
-  ? ""
-  : (import.meta.env.VITE_API_URL || "http://localhost:8000")
-
 async function send() {
   if (!question.value.trim() || loading.value) return
   const q = question.value.trim()
@@ -120,7 +116,7 @@ async function send() {
   messages.value.push({ role: "assistant", content: "", sources: [] })
 
   try {
-    const resp = await authFetch(`${_apiBase}/api/rag/query`, {
+    const resp = await authFetch(`${apiBase()}/api/rag/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: q, top_k: 5, stream: true }),

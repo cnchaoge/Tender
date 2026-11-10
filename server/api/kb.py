@@ -22,6 +22,7 @@ from server.domain.documents.files import (
     resolve_stored_path,
     sha256_file,
 )
+from server.domain.documents.scan_paths import is_path_within, resolve_scan_roots
 from server.models import Chunk, Document, Resp
 from server.workers.document_worker import cleanup_partial_document, write_lock
 from server.workers.executor import schedule_document
@@ -49,6 +50,20 @@ def _file_type_for_suffix(suffix: str) -> str:
 def _size_error() -> HTTPException:
     limit = int(get_settings().MAX_FILE_SIZE or 0)
     return HTTPException(status_code=413, detail=f"文件超过大小限制（{limit}MB）")
+
+
+def _scan_roots() -> list[Path]:
+    return resolve_scan_roots(get_settings().KB_SCAN_ROOTS or "")
+
+
+def _folder_allowed(folder: Path) -> bool:
+    return any(is_path_within(folder, root) for root in _scan_roots())
+
+
+_SCAN_FORBIDDEN = (
+    "该目录不在 KB_SCAN_ROOTS 允许列表中。"
+    "请配置具体的资料目录，不要填写用户主目录或磁盘根目录。"
+)
 
 
 def _lookup_duplicate(filename: str, digest: str) -> sqlite3.Row | None:
@@ -147,12 +162,30 @@ def list_documents():
     return [Document(**dict(r)) for r in rows]
 
 
+def _discard_document(doc_id: int) -> None:
+    remove_managed_tree(doc_id)
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
+        cur.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _queue_folder(folder: Path) -> list[Document]:
     """复制进资料库后立即返回 pending。不把用户磁盘上的原路径当作唯一副本。"""
+    roots = _scan_roots()
     files: list[Path] = []
     for ext in _FOLDER_SUFFIXES:
         for file_path in folder.rglob(f"*{ext}"):
             if "node_modules" in file_path.parts or "__pycache__" in file_path.parts:
+                continue
+            # resolve() follows symlinks, so a link that leaves the allowlist is skipped.
+            if not any(is_path_within(file_path, root) for root in roots):
+                continue
+            if not file_path.is_file():
                 continue
             files.append(file_path)
 
@@ -189,7 +222,13 @@ def _queue_folder(folder: Path) -> list[Document]:
                 digest,
             )
             dest = copy_into_library(doc.id, file_path)
-            _store_managed_path(doc.id, dest, size)
+            copied_size = dest.stat().st_size
+            if max_upload_bytes() > 0 and copied_size > max_upload_bytes():
+                _discard_document(doc.id)
+                skipped_large += 1
+                doc = None
+                continue
+            _store_managed_path(doc.id, dest, copied_size)
         except sqlite3.IntegrityError:
             continue
         except Exception:
@@ -224,8 +263,10 @@ def _queue_folder(folder: Path) -> list[Document]:
 
 @router.get("/folder", response_model=list[Document])
 async def add_folder(folder_path: str):
-    """扫描文件夹并立即返回 pending 文档，解析和向量化在后台完成。"""
+    """扫描允许目录，把文件复制进资料库后返回 pending。"""
     folder = Path(folder_path)
+    if not _folder_allowed(folder):
+        raise HTTPException(status_code=403, detail=_SCAN_FORBIDDEN)
     if not folder.is_dir():
         raise HTTPException(status_code=400, detail="文件夹不存在")
     # Directory walk is synchronous; keep it off the event loop. OCR/embed is

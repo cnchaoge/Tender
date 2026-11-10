@@ -1,28 +1,11 @@
 @echo off
 chcp 65001 >nul 2>&1
-echo ======================================
-echo  Tender Starting...
-echo ======================================
+cd /d "%~dp0"
+echo Tender: one process, no --reload, no --workers
+echo Listening on 127.0.0.1:8000
+echo Build the frontend first: cd web ^&^& npm run build
+echo First-run password file: data\initial_admin_password.txt
+echo Do not start a second process against the same data\ directory.
 echo.
-
-cd /d "%~dp0server"
-
-echo [1/2] Checking dependencies...
-python -c "import fastapi, uvicorn, chromadb" 2>nul
-if errorlevel 1 (
-    echo [ERROR] Dependencies not found, installing...
-    pip install -r requirements.txt
-)
-
-echo.
-echo [2/2] Starting server...
-echo   Admin UI: http://localhost:8000/web
-echo   First install: the one-time admin password is printed below
-echo   and saved to data\initial_admin_password.txt
-echo.
-echo Press Ctrl+C to stop
-echo.
-
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
+python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 pause

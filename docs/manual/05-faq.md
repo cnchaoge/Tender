@@ -42,16 +42,16 @@ Embedding 模型 API Key 配置错误。
 
 ## Q5：如何更新到新版本？
 
-1. 下载最新版的 `Tender.exe`
-2. 替换旧文件（建议先备份 `data` 文件夹）
-3. 重启程序
+仓库没有可下载的 `Tender.exe`。更新的是这份源码。
 
-> 注：数据文件在 `data` 文件夹中，更新程序不会清除数据。
+1. 停掉唯一的 Tender 进程。
+2. 按 [备份与恢复](/ops/backup-and-recovery) 把 SQLite、Chroma、`data/library/`、`.env` 和 `data/.secret_key` 作为同一套拷走。
+3. 更新代码后，在 `web/` 执行 `npm run build`，再用 `bash start.sh` 启动一个进程。
+
+不要只拷走 `tender.db`。SQLite 和 Chroma 必须来自同一次备份，而且备份目录和正在使用的 `data/` 不能被两个进程同时打开。
 
 ---
 
 ## Q6：Mac / Linux 可以用吗？
 
-当前版本仅支持 **Windows 部署**。Mac/Linux 用户可通过虚拟机或远程访问 Windows 服务器使用。
-
-如需 Mac 原生版本，可联系我们单独定制。
+可以。Mac、Linux 和 Windows 都用 [安装与启动](/manual/02-install) 里的虚拟环境、`.env`、`npm run build` 和 `start.sh` / `run.bat`。不需要为了运行而安装 Windows 虚拟机。

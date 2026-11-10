@@ -40,8 +40,8 @@ class SecretKeyError(RuntimeError):
 class Settings(BaseSettings):
     """应用配置"""
 
-    # 服务
-    HOST: str = "0.0.0.0"
+    # 服务。默认只绑定本机。办公室网络上不要改成 0.0.0.0 后直接暴露明文 HTTP。
+    HOST: str = "127.0.0.1"
     PORT: int = 8000
     # Empty means "not configured". Do not put a real or public secret here.
     SECRET_KEY: str = ""
@@ -83,6 +83,10 @@ class Settings(BaseSettings):
 
     # File size limit (MB)
     MAX_FILE_SIZE: int = 50
+
+    # Comma-separated directories folder import may copy from. Empty disables
+    # folder scan. Home, ancestors of home, and filesystem roots are ignored.
+    KB_SCAN_ROOTS: str = ""
 
     class Config:
         env_file = ".env"
