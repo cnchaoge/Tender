@@ -134,9 +134,15 @@ def insert_job(
 
 
 def _unfinished_by_key(cur, key: str):
+    """同一份生成还在排队或运行时复用那一笔。已经请求取消的不占用这个键。
+
+    运行中的取消要等到安全点才变成 cancelled。在那之前新的一笔必须能排上，
+    否则取消了的生成会挡住下一次相同内容的生成。
+    """
     cur.execute(
         """SELECT * FROM jobs
            WHERE idempotency_key = ? AND status IN ('queued', 'running')
+             AND cancel_requested = 0
            ORDER BY id DESC
            LIMIT 1""",
         (key,),
