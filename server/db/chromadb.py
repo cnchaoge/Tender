@@ -3,10 +3,8 @@ Tender - ChromaDB 向量数据库
 """
 import chromadb
 from chromadb.config import Settings
-from server.config import get_settings, BASE_DIR
+from server.config import get_settings
 from server.core.embedder.embedder import get_embedder
-
-settings = get_settings()
 
 _client = None
 _collection = None
@@ -18,8 +16,9 @@ def get_chroma_client():
     global _client, _collection
     if _client is None:
         _collection = None
+        # 客户端只跟目录有关，可以在进程内复用。目录在第一次打开时读取，不在导入时绑定。
         _client = chromadb.PersistentClient(
-            path=settings.CHROMA_PERSIST_DIR,
+            path=get_settings().CHROMA_PERSIST_DIR,
             settings=Settings(anonymized_telemetry=False)
         )
     return _client

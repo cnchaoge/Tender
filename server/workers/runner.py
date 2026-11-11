@@ -118,6 +118,18 @@ def _claim():
     return None
 
 
+def _finish_if_cancel_requested(job_id: int) -> bool:
+    """取消已经写下时，不再调用处理器，并把仍在跑的作业收成 cancelled。"""
+    from server.domain.jobs.store import TERMINAL, get_job_row, is_cancel_requested
+
+    if not is_cancel_requested(job_id):
+        return False
+    current = get_job_row(job_id)
+    if current["status"] not in TERMINAL:
+        finish(job_id, "cancelled", message="已取消")
+    return True
+
+
 def _release(bucket: str) -> None:
     with _lock:
         _inflight[bucket] = max(0, _inflight[bucket] - 1)
@@ -130,8 +142,8 @@ def _execute(job: dict, bucket: str) -> None:
 
     token = pin_runtime(attach_clients(job.get("runtime") or {}), job_id=job["id"])
     try:
-        if job.get("cancel_requested"):
-            request_cancel(job["id"])
+        # 认领时的快照可能还没看到取消。进处理器之前再读一次库。
+        if _finish_if_cancel_requested(job["id"]):
             return
         result = dispatch(job)
         # 执行期间如果已经置了取消，并且处理器没有自己收成 cancelled，这里补上。

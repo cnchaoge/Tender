@@ -237,17 +237,62 @@ def test_same_generate_key_reuses_unfinished_job(monkeypatch, tmp_path):
 
 
 def test_cancelled_generate_does_not_block_a_new_one(monkeypatch, tmp_path):
-    _use_temp_db(monkeypatch, tmp_path)
-    monkeypatch.setitem(handlers_mod.HANDLERS, "bid.generate", lambda job: {"ok": True})
-    req = BidGenerateReq(parse_result=dict(PARSE), materials=[1], strategy="综合均衡型")
-    first = enqueue_generate(req)
-    from server.domain.jobs.service import cancel_job
+    """取消不能挡住下一笔相同生成。
 
-    cancelled = cancel_job(first["id"])
-    assert cancelled["status"] == "cancelled"
-    second = enqueue_generate(req)
-    assert second["id"] != first["id"]
-    assert _wait_status(second["id"], {"succeeded"})["status"] == "succeeded"
+    还在排队时，取消立刻变成 cancelled。已经在跑时，状态先留在 running，
+    只记下 cancel_requested；这时再排同一份生成必须是新作业。跑到安全点后，
+    前一笔收成 cancelled，后一笔可以成功。
+    """
+    _use_temp_db(monkeypatch, tmp_path)
+    from server.domain.jobs.service import cancel_job
+    from server.workers import runner as runner_mod
+
+    req = BidGenerateReq(parse_result=dict(PARSE), materials=[1], strategy="综合均衡型")
+    start_runner = runner_mod.ensure_runner
+    monkeypatch.setattr(runner_mod, "ensure_runner", lambda: None)
+    queued = enqueue_generate(req)
+    assert get_job_row(queued["id"])["status"] == "queued"
+    cancelled_queued = cancel_job(queued["id"])
+    assert cancelled_queued["status"] == "cancelled"
+    assert cancelled_queued["cancel_requested"] is True
+
+    release = threading.Event()
+    started = threading.Event()
+    calls = []
+
+    def block_first(job):
+        calls.append(job["id"])
+        if len(calls) == 1:
+            started.set()
+            assert release.wait(3)
+        return {"ok": True}
+
+    monkeypatch.setattr(runner_mod, "ensure_runner", start_runner)
+    monkeypatch.setitem(handlers_mod.HANDLERS, "bid.generate", block_first)
+    try:
+        running_job = enqueue_generate(req)
+        assert running_job["id"] != queued["id"]
+        assert started.wait(3)
+        assert get_job_row(running_job["id"])["status"] == "running"
+
+        marked = cancel_job(running_job["id"])
+        assert marked["status"] == "running"
+        assert marked["cancel_requested"] is True
+
+        # 前一笔还停在 running。取消标记不能让幂等键继续占用它。
+        follow = enqueue_generate(req)
+        assert follow["id"] not in {queued["id"], running_job["id"]}
+        assert get_job_row(follow["id"])["status"] == "queued"
+        assert get_job_row(running_job["id"])["status"] == "running"
+
+        release.set()
+        assert _wait_status(running_job["id"], {"cancelled"})["status"] == "cancelled"
+        assert _wait_status(follow["id"], {"succeeded"})["status"] == "succeeded"
+        assert calls[0] == running_job["id"]
+        assert follow["id"] in calls
+    finally:
+        release.set()
+        shutdown_runner(wait=True)
 
 
 def test_cancel_keeps_written_chapters_and_skips_later_model_calls(monkeypatch, tmp_path):
@@ -393,25 +438,34 @@ def test_restart_interrupts_generate_and_requeues_ingest(monkeypatch, tmp_path):
 
 
 def test_runtime_snapshot_survives_a_later_settings_change(monkeypatch):
-    captured = runtime_mod.capture_runtime()
-    token = runtime_mod.pin_runtime(runtime_mod.attach_clients(captured), job_id=1)
-    try:
-        from server.core.generator.llm import get_generator, settings as llm_settings
+    from server.config import get_settings
 
-        original = llm_settings.LLM_PROVIDER
-        llm_settings.LLM_PROVIDER = "mock" if original != "mock" else "ollama"
+    get_settings.cache_clear()
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "snapshot-model")
+    monkeypatch.setenv("EMBED_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_EMBED_MODEL", "embed-snapshot")
+    get_settings.cache_clear()
+    try:
+        captured = runtime_mod.capture_runtime()
+        token = runtime_mod.pin_runtime(runtime_mod.attach_clients(captured), job_id=1)
         try:
+            monkeypatch.setenv("LLM_PROVIDER", "mock")
+            monkeypatch.setenv("OLLAMA_MODEL", "other-model")
+            get_settings.cache_clear()
+            from server.core.generator.llm import get_generator
+
             generator = get_generator()
-            assert getattr(generator, "model", None) == captured["llm_model"]
-        finally:
-            llm_settings.LLM_PROVIDER = original
-        assert captured["egress"] in {"local", "cloud"}
-        if captured["llm_provider"] in {"deepseek", "dashscope", "openai", "minimax"} or captured["embed_provider"] == "dashscope":
-            assert captured["egress"] == "cloud"
-        else:
+            assert getattr(generator, "model", None) == "snapshot-model"
+            assert captured["llm_model"] == "snapshot-model"
             assert captured["egress"] == "local"
+            fresh = runtime_mod.capture_runtime()
+            assert fresh["llm_provider"] == "mock"
+            assert fresh["llm_model"] == "mock"
+        finally:
+            runtime_mod.reset_runtime(token)
     finally:
-        runtime_mod.reset_runtime(token)
+        get_settings.cache_clear()
 
 
 def test_document_status_is_projection_of_latest_ingest(monkeypatch, tmp_path):

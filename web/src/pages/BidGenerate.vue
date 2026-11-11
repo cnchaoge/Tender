@@ -57,6 +57,7 @@
           :format-result="formatResult"
           :violation-result="violationResult"
           :plagiarism-result="plagiarismResult"
+          :egress-note="egressNote"
           @update:selected-strategy="selectedStrategy = $event"
           @generate="handleGenerate"
           @download="downloadBidFile"
@@ -114,6 +115,7 @@ import {
   uploadTender,
 } from "../features/projects/api"
 import api, { downloadWithAuth } from "../api"
+import { jobEgressNote } from "../features/settings/egress"
 import {
   cancelJob,
   cancelJobKeepalive,
@@ -172,6 +174,7 @@ const showChecklistDialog = ref(false)
 const reviewResult = ref(null)
 const progress = ref(0)
 const progressMessage = ref("")
+const egressNote = ref("")
 const streamingContent = ref("")   // 原始 markdown 文本
 const renderedContent = ref("")    // 渲染后的 HTML
 const showUploadInline = ref(false)  // 内联上传区展开
@@ -466,7 +469,7 @@ async function onFileSelected(file) {
     parseResult.value = parsed
     const recommended = parsed.recommended_materials || []
     selectedMaterials.value = recommended.map(m => m.id)
-    rememberBaseline(resp.data)
+    rememberBaseline(parsed)
     await setProjectMaterials(id, selectedMaterials.value)
     ElMessage.success("招标文件解析完成" + (recommended.length ? `，已自动关联 ${recommended.length} 个相关素材` : ""))
     loadVersions()
@@ -733,6 +736,7 @@ async function restoreStoppedDraft(project) {
   if (!stopped.job_id) return
   try {
     const job = await getJob(stopped.job_id)
+    egressNote.value = jobEgressNote(job.runtime)
     if (job.status === "queued" || job.status === "running") {
       streamingContent.value = ""
       renderedContent.value = ""
@@ -779,8 +783,9 @@ async function doGenerate() {
   streamingContent.value = ""
   renderedContent.value = ""
   stoppedDraft.value = null
-  generateOutcome = ""
-  resetChapterStates()
+    generateOutcome = ""
+    egressNote.value = ""
+    resetChapterStates()
   genCurrentStep.value = 1
 
   try {
@@ -795,6 +800,7 @@ async function doGenerate() {
         project_id: activeProjectId.value,
       },
     })
+    egressNote.value = jobEgressNote(job.runtime)
     armLeaveCancel(job.id)
     await readJobEvents(job.id, { cancelOnDisconnect: true, onEvent: applyGenerateEvent })
     if (generateOutcome === "done" || generatedFile.value) ElMessage.success("标书生成成功")

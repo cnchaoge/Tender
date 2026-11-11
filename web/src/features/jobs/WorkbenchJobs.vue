@@ -20,7 +20,13 @@
           <tr v-for="row in rows" :key="row.id">
             <td>{{ statusText(row.status) }}</td>
             <td>{{ row.progress }}%</td>
-            <td class="name-cell">{{ row.message || "—" }}</td>
+            <td class="name-cell">
+              <div class="job-message">
+                <span v-if="row.runtime?.egress" class="egress-tag" :class="row.runtime.egress">{{ row.runtime.egress }}</span>
+                <span>{{ row.message || "—" }}</span>
+              </div>
+              <p v-if="noteFor(row)" class="egress-note">{{ noteFor(row) }}</p>
+            </td>
             <td>
               <router-link v-if="row.project_id" :to="projectLink(row.project_id)" class="row-link">打开项目</router-link>
               <span v-else>—</span>
@@ -35,6 +41,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref } from "vue"
 import { listJobs } from "./client"
+import { jobEgressNote } from "../settings/egress"
 
 const rows = ref([])
 const loading = ref(true)
@@ -56,6 +63,10 @@ function statusText(status) {
 
 function projectLink(id) {
   return { path: "/bid", query: { project_id: String(id) } }
+}
+
+function noteFor(row) {
+  return jobEgressNote(row?.runtime)
 }
 
 async function refresh() {
@@ -138,4 +149,31 @@ onBeforeUnmount(() => {
   color: var(--color-primary);
 }
 .name-cell { font-weight: 500; }
+.job-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.egress-tag {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+}
+.egress-tag.local {
+  background: rgba(36, 161, 72, 0.12);
+  color: var(--color-semantic-success);
+}
+.egress-tag.cloud {
+  background: rgba(245, 108, 108, 0.12);
+  color: var(--color-semantic-error);
+}
+.egress-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--color-ink-muted);
+}
 </style>

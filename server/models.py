@@ -109,9 +109,10 @@ class BidTemplateUpdateReq(BaseModel):
 
 # ============ 标书 ============
 class BidParseReq(BaseModel):
-    file_path: Optional[str] = None  # 旧接口。阶段 5 之前仍接受，内部先找到受管文件
     document_id: Optional[int] = None  # 项目招标文件
     project_id: Optional[int] = None
+    # 阶段 5 起不再按磁盘路径解析。非空时接口拒绝，避免打开调用方传来的路径。
+    file_path: Optional[str] = None
 
 
 class ScoringItem(BaseModel):

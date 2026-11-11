@@ -2,10 +2,7 @@
 Tender - LLM 生成器
 支持 DeepSeek / 通义 / OpenAI / Mock
 """
-from typing import Optional
 from server.config import get_settings
-
-settings = get_settings()
 
 
 class BaseGenerator:
@@ -77,10 +74,11 @@ class MockGenerator(BaseGenerator):
 class DeepSeekGenerator(BaseGenerator):
     """DeepSeek API（OpenAI 兼容格式）"""
     def __init__(self, model: str | None = None):
-        super().__init__(model or settings.DEEPSEEK_MODEL)
+        current = get_settings()
+        super().__init__(model or current.DEEPSEEK_MODEL)
         from openai import OpenAI
         self.client = OpenAI(
-            api_key=settings.DEEPSEEK_API_KEY,
+            api_key=current.DEEPSEEK_API_KEY,
             base_url="https://api.deepseek.com",
         )
 
@@ -116,12 +114,16 @@ class DeepSeekGenerator(BaseGenerator):
 
 class DashScopeGenerator(BaseGenerator):
     def __init__(self, model: str | None = None):
-        super().__init__(model or settings.DASHSCOPE_MODEL)
+        current = get_settings()
+        super().__init__(model or current.DASHSCOPE_MODEL)
+        self.api_key = current.DASHSCOPE_API_KEY
         import dashscope
-        dashscope.api_key = settings.DASHSCOPE_API_KEY
+        dashscope.api_key = self.api_key
 
     def generate(self, prompt: str, system: str = "", **kwargs) -> str:
+        import dashscope
         from dashscope import Generation
+        dashscope.api_key = self.api_key
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -138,9 +140,10 @@ class DashScopeGenerator(BaseGenerator):
 
 class OpenAIGenerator(BaseGenerator):
     def __init__(self, model: str | None = None):
-        super().__init__(model or settings.OPENAI_MODEL)
+        current = get_settings()
+        super().__init__(model or current.OPENAI_MODEL)
         from openai import OpenAI
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = OpenAI(api_key=current.OPENAI_API_KEY)
 
     def generate(self, prompt: str, system: str = "", **kwargs) -> str:
         messages = []
@@ -158,10 +161,11 @@ class OpenAIGenerator(BaseGenerator):
 class MiniMaxGenerator(BaseGenerator):
     """MiniMax API（OpenAI 兼容格式）"""
     def __init__(self, model: str | None = None):
-        super().__init__(model or settings.MINIMAX_MODEL)
+        current = get_settings()
+        super().__init__(model or current.MINIMAX_MODEL)
         from openai import OpenAI
         self.client = OpenAI(
-            api_key=settings.MINIMAX_API_KEY,
+            api_key=current.MINIMAX_API_KEY,
             base_url="https://api.minimax.chat/v1",
         )
 
@@ -181,11 +185,12 @@ class MiniMaxGenerator(BaseGenerator):
 class OllamaGenerator(BaseGenerator):
     """Ollama 本地 LLM（OpenAI 兼容 API，无需 API Key）"""
     def __init__(self, model: str | None = None):
-        super().__init__(model or settings.OLLAMA_MODEL)
+        current = get_settings()
+        super().__init__(model or current.OLLAMA_MODEL)
         from openai import OpenAI
         self.client = OpenAI(
             api_key="ollama",  # Ollama 不校验 API Key，但 OpenAI SDK 要求非空
-            base_url=f"{settings.OLLAMA_BASE_URL}/v1",
+            base_url=f"{current.OLLAMA_BASE_URL.rstrip('/')}/v1",
         )
 
     def generate(self, prompt: str, system: str = "", **kwargs) -> str:
@@ -225,7 +230,7 @@ def get_generator():
     pinned = pinned_generator()
     if pinned is not None:
         return pinned
-    provider = settings.LLM_PROVIDER
+    provider = (get_settings().LLM_PROVIDER or "").strip().lower()
 
     if provider == "mock":
         return MockGenerator()

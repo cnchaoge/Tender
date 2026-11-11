@@ -66,8 +66,8 @@ def _prepare_chroma(monkeypatch, tmp_path: Path):
     chroma_dir = tmp_path / "chroma"
     monkeypatch.setattr(
         chroma_mod,
-        "settings",
-        type("S", (), {"CHROMA_PERSIST_DIR": str(chroma_dir)})(),
+        "get_settings",
+        lambda: type("S", (), {"CHROMA_PERSIST_DIR": str(chroma_dir)})(),
     )
     chroma_mod._client = None
     chroma_mod._collection = None

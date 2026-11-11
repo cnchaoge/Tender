@@ -10,6 +10,11 @@ from server.domain.documents.index_build import EmbeddingIdentity
 _CLOUD_LLM = {"deepseek", "dashscope", "openai", "minimax"}
 _CLOUD_EMBED = {"dashscope"}
 
+# 设置页和作业记录用同一句。mock 不在云端集合里，文本留在本机，但不能成为检索索引。
+CLOUD_EGRESS_NOTE = (
+    "egress=cloud：使用云端模型时，该次作业的提示词和所需正文会离开本机，发往该服务商。不会发送整个 data 目录。"
+)
+
 _pinned: ContextVar[dict | None] = ContextVar("tender_job_runtime", default=None)
 
 
@@ -18,13 +23,17 @@ def capture_runtime() -> dict:
     settings = get_settings()
     llm = (settings.LLM_PROVIDER or "ollama").strip().lower()
     embed = (settings.EMBED_PROVIDER or "ollama").strip().lower()
-    return {
+    egress = _egress(llm, embed)
+    snapshot = {
         "llm_provider": llm,
         "llm_model": _llm_model(settings, llm),
         "embed_provider": embed,
         "embed_model": _embed_model(settings, embed),
-        "egress": _egress(llm, embed),
+        "egress": egress,
     }
+    if egress == "cloud":
+        snapshot["note"] = CLOUD_EGRESS_NOTE
+    return snapshot
 
 
 def _llm_model(settings, provider: str) -> str:
@@ -182,13 +191,16 @@ def raise_if_cancelled() -> None:
 def runtime_public(runtime: dict | None) -> dict:
     """去掉挂在快照上的客户端对象，只留下可序列化的字段。"""
     data = dict(runtime or {})
-    return {
+    public = {
         "llm_provider": data.get("llm_provider"),
         "llm_model": data.get("llm_model"),
         "embed_provider": data.get("embed_provider"),
         "embed_model": data.get("embed_model"),
         "egress": data.get("egress"),
     }
+    if public.get("egress") == "cloud":
+        public["note"] = data.get("note") or CLOUD_EGRESS_NOTE
+    return public
 
 
 def as_jsonable(runtime: dict | None) -> dict[str, Any]:
